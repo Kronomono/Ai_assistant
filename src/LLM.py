@@ -35,6 +35,33 @@ class LlamaWrapper:
                     pass
             return json.dumps({"response": response})
 
+class LlamaWrapper:
+    def __init__(self, llama_model):
+        self.llama = llama_model
+
+    def ask(self, prompts, format="", temperature=0.7):
+        prompt = " ".join([p["content"] for p in prompts])
+        output = self.llama(prompt, max_tokens=2048, temperature=temperature, top_p=0.9, echo=False)
+        response = output['choices'][0]['text'].strip()
+
+        if format == "json":
+            return self.parse_json_response(response)
+        return response
+
+    def parse_json_response(self, response):
+        try:
+            json_response = json.loads(response)
+            return json.dumps(json_response)
+        except json.JSONDecodeError:
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                try:
+                    json_response = json.loads(json_match.group())
+                    return json.dumps(json_response)
+                except json.JSONDecodeError:
+                    pass
+            return json.dumps({"response": response})
+
 class LLMWrapper:
     def __init__(self, model_path):
         self.model_path = model_path
@@ -51,11 +78,43 @@ class LLMWrapper:
             self.initialize()
         return self.llama_wrapper.ask(prompts, format, temperature)
 
+    def classify_query(self, query):
+        classification_prompt = f"""
+        Classify the following query as 'online' or 'local' based on whether the query wants information for online such as providing a link, or is just asking for a task: 
+
+        Query: "{query}"
+
+        Classification (online/local):
+        """
+        response = self.ask([{'role': 'user', 'content': classification_prompt}], temperature=0.3).strip()
+        if 'online' in response.lower():
+            return "online"
+        return "local"
+
     def generate_response(self, user_input):
         if self.llm is None:
             self.initialize()
 
-        logger.info("Attempting online search...")
+        query_type = self.classify_query(user_input)
+
+        if query_type == "online":
+            logger.info("Information query detected, using online search...")
+            return self.perform_online_search(user_input)
+        else:
+            logger.info("General query detected, using local model...")
+            return self.perform_local_query(user_input)
+
+    def perform_local_query(self, user_input):
+        local_response = self.get_local_knowledge_response(user_input)
+        
+        if "I don't have enough reliable information" not in local_response:
+            logger.info("Local knowledge response found.")
+            return f"[Using local knowledge] {local_response}"
+
+        logger.info("Local knowledge response insufficient, attempting online search...")
+        return self.perform_online_search(user_input)
+
+    def perform_online_search(self, user_input):
         try:
             url = self.extract_url(user_input)
             if url:
@@ -71,9 +130,7 @@ class LLMWrapper:
                 logger.info("No valid online information found.")
         except Exception as e:
             logger.error(f"Error during online search: {e}", exc_info=True)
-
-        logger.info("Falling back to local knowledge.")
-        return self.get_local_knowledge_response(user_input)
+            return "I couldn't retrieve information from the internet."
 
     def extract_url(self, text):
         url_match = re.search(r'https?://\S+', text)
@@ -156,7 +213,7 @@ Answer:"""
 llm_wrapper = LLMWrapper("llama_model/dolphin-2.9-llama3-8b-q8_0.gguf")
 
 if __name__ == "__main__":
-    prompt = "according to the website https://oshinoko.fandom.com/wiki/Akane_Kurokawa what does Akane Kurokawa look like?"
+    prompt = "you are to roleplay as Akane Kurokawa from oshi no ko https://oshinoko.fandom.com/wiki/Akane_Kurokawa introduce yourself, your passions, hobbies etc. "
     print(f"Processing prompt: {prompt}")
     response = llm_wrapper.generate_response(prompt)
     print("\nGenerated output:")
@@ -164,3 +221,4 @@ if __name__ == "__main__":
 
     print("\nDebug Information:")
     print(f"LLM initialized: {llm_wrapper.llm is not None}")
+
