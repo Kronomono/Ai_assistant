@@ -17,47 +17,16 @@ class LlamaWrapper:
         output = self.llama(prompt, max_tokens=2048, temperature=temperature, top_p=0.9, echo=False)
         response = output['choices'][0]['text'].strip()
 
-        if format == "json":
-            return self.parse_json_response(response)
-        return response
+        return self.parse_json_response(response) if format == "json" else response
 
     def parse_json_response(self, response):
         try:
-            json_response = json.loads(response)
-            return json.dumps(json_response)
+            return json.dumps(json.loads(response))
         except json.JSONDecodeError:
             json_match = re.search(r'\{.*\}', response, re.DOTALL)
             if json_match:
                 try:
-                    json_response = json.loads(json_match.group())
-                    return json.dumps(json_response)
-                except json.JSONDecodeError:
-                    pass
-            return json.dumps({"response": response})
-
-class LlamaWrapper:
-    def __init__(self, llama_model):
-        self.llama = llama_model
-
-    def ask(self, prompts, format="", temperature=0.7):
-        prompt = " ".join([p["content"] for p in prompts])
-        output = self.llama(prompt, max_tokens=2048, temperature=temperature, top_p=0.9, echo=False)
-        response = output['choices'][0]['text'].strip()
-
-        if format == "json":
-            return self.parse_json_response(response)
-        return response
-
-    def parse_json_response(self, response):
-        try:
-            json_response = json.loads(response)
-            return json.dumps(json_response)
-        except json.JSONDecodeError:
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
-            if json_match:
-                try:
-                    json_response = json.loads(json_match.group())
-                    return json.dumps(json_response)
+                    return json.dumps(json.loads(json_match.group()))
                 except json.JSONDecodeError:
                     pass
             return json.dumps({"response": response})
@@ -74,34 +43,62 @@ class LLMWrapper:
             self.llama_wrapper = LlamaWrapper(self.llm)
 
     def ask(self, prompts: list, format: str = "", temperature: float = 0.7):
-        if self.llm is None:
-            self.initialize()
+        self.initialize()
         return self.llama_wrapper.ask(prompts, format, temperature)
 
     def classify_query(self, query):
         classification_prompt = f"""
-        Classify the following query as 'online' or 'local' based on whether the query wants information for online such as providing a link, or is just asking for a task: 
+        Classify the following query as 'online' or 'local' based on these criteria:
+
+        Online:
+        - Requires up-to-date information (e.g., current events, weather, stock prices)
+        - Asks for specific web content or links
+        - Requires information about recent or upcoming events
+        - Involves searching for or comparing products or services
+        - Needs information about a specific person, place, or thing that may not be in a general knowledge base
+
+        Local:
+        - General knowledge questions
+        - Mathematical calculations or problem-solving
+        - Language-related tasks (translation, grammar, etc.)
+        - Coding help or explanations
+        - Hypothetical scenarios or creative tasks
+        - Personal advice or opinions (that don't require current data)
 
         Query: "{query}"
 
         Classification (online/local):
+        Explanation:
         """
         response = self.ask([{'role': 'user', 'content': classification_prompt}], temperature=0.3).strip()
+        
+        # Extract classification and explanation
+        classification = 'local'  # Default to local
+        explanation = ''
+        
         if 'online' in response.lower():
-            return "online"
-        return "local"
+            classification = 'online'
+        
+        explanation_match = re.search(r'Explanation:(.*)', response, re.DOTALL)
+        if explanation_match:
+            explanation = explanation_match.group(1).strip()
+        
+        logger.info(f"Query classification: {classification}")
+        logger.info(f"Classification explanation: {explanation}")
+        
+        return classification, explanation
 
     def generate_response(self, user_input):
         if self.llm is None:
             self.initialize()
 
-        query_type = self.classify_query(user_input)
+        query_type, explanation = self.classify_query(user_input)
 
         if query_type == "online":
-            logger.info("Information query detected, using online search...")
+            logger.info(f"Online query detected: {explanation}")
             return self.perform_online_search(user_input)
         else:
-            logger.info("General query detected, using local model...")
+            logger.info(f"Local query detected: {explanation}")
             return self.perform_local_query(user_input)
 
     def perform_local_query(self, user_input):
@@ -117,11 +114,7 @@ class LLMWrapper:
     def perform_online_search(self, user_input):
         try:
             url = self.extract_url(user_input)
-            if url:
-                logger.info(f"Specific URL found: {url}")
-                online_response = self.process_specific_url(url, user_input)
-            else:
-                online_response = self.enhanced_online_search(user_input)
+            online_response = self.process_specific_url(url, user_input) if url else self.enhanced_online_search(user_input)
             
             if online_response:
                 logger.info("Valid online information found.")
@@ -130,13 +123,12 @@ class LLMWrapper:
                 logger.info("No valid online information found.")
         except Exception as e:
             logger.error(f"Error during online search: {e}", exc_info=True)
-            return "I couldn't retrieve information from the internet."
+        return "I couldn't retrieve information from the internet."
 
-    def extract_url(self, text):
+    @staticmethod
+    def extract_url(text):
         url_match = re.search(r'https?://\S+', text)
-        if url_match:
-            return url_match.group()
-        return None
+        return url_match.group() if url_match else None
 
     def process_specific_url(self, url, user_input):
         try:
@@ -155,13 +147,13 @@ class LLMWrapper:
         search_results = internet_search(user_input)
         if search_results:
             for result in search_results[:5]:  # Check top 5 results
-                url = result.get('url', '')
-                response = self.process_specific_url(url, user_input)
+                response = self.process_specific_url(result.get('url', ''), user_input)
                 if response:
                     return response
         return None
 
-    def safe_read_website(self, url):
+    @staticmethod
+    def safe_read_website(url):
         try:
             return read_website(url)
         except requests.exceptions.RequestException as e:
@@ -184,8 +176,7 @@ Instructions:
 
 Extracted Information:"""
 
-        extracted_info = self.ask([{'role': 'user', 'content': prompt}], temperature=0.3)
-        return extracted_info.strip()
+        return self.ask([{'role': 'user', 'content': prompt}], temperature=0.3).strip()
 
     def get_local_knowledge_response(self, user_input):
         local_prompt = f"""You are a knowledgeable assistant with expertise in various fields. Please answer the following question to the best of your ability:
@@ -204,16 +195,13 @@ Answer:"""
         local_response = self.ask([{'role': 'user', 'content': local_prompt}], temperature=0.3)
         logger.debug(f"Local knowledge response: {local_response}")
         
-        if not local_response.strip():
-            local_response = "I don't have enough reliable information to answer this question accurately."
-        
-        return f"[Using local knowledge] {local_response}"
+        return local_response.strip() or "I don't have enough reliable information to answer this question accurately."
 
 # Create a global instance
 llm_wrapper = LLMWrapper("llama_model/dolphin-2.9-llama3-8b-q8_0.gguf")
 
 if __name__ == "__main__":
-    prompt = "you are to roleplay as Akane Kurokawa from oshi no ko https://oshinoko.fandom.com/wiki/Akane_Kurokawa introduce yourself, your passions, hobbies etc. "
+    prompt = "You are to role play as Akane Kurokawa from oshi no ko. I am your biggest fan asking for an autograph and picture. Please respond."
     print(f"Processing prompt: {prompt}")
     response = llm_wrapper.generate_response(prompt)
     print("\nGenerated output:")
@@ -221,4 +209,3 @@ if __name__ == "__main__":
 
     print("\nDebug Information:")
     print(f"LLM initialized: {llm_wrapper.llm is not None}")
-
