@@ -4,7 +4,7 @@ import logging
 import requests
 from llama_cpp import Llama
 from llm_axe.core import internet_search, read_website
-from memory import Memory  # Import the Memory class
+from memory import Memory  
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ class LLMWrapper:
         self.model_path = model_path
         self.llm = None
         self.llama_wrapper = None
-        self.memory = Memory()  # Initialize the Memory instance
+        self.memory = Memory()  # Initialize the new Memory class
         self.assistant_name = "Akane"
         self.assistant_role = "virtual assistant"
 
@@ -117,17 +117,10 @@ Response:"""
             response = self.perform_local_query(prompt_with_context)
 
         # Save the interaction to memory
-        self.memory.add_to_conversation("user", user_input)
-        self.memory.add_to_conversation("assistant", response)
-        self.memory.save_current_conversation()
-
-        # Append the new conversation to the existing memory file
-        try:
-            self.memory.append_to_file("conversation_history.gz")
-        except Exception as e:
-            logger.error(f"Error appending to memory file: {e}")
-            # Optionally, you can add a fallback method here, such as:
-            # self.memory.save_to_file("conversation_history_new.gz")
+        self.memory.add_conversation([
+            {"role": "user", "content": user_input},
+            {"role": "assistant", "content": response}
+        ])
 
         return response
 
@@ -246,24 +239,11 @@ Response:"""
         
         return personal_response.strip()
 
-    def save_memory(self, filename="conversation_history.gz"):
-        """Append the current state of the memory to the existing file."""
-        self.memory.append_to_file(filename)
-        logger.info(f"Memory appended to {filename}")
-
-    def load_memory(self, filename="conversation_history.gz"):
-        """Load the state of the memory from a file."""
-        self.memory.load_from_file(filename)
-        logger.info(f"Memory loaded from {filename}")
-
 # Create a global instance
 llm_wrapper = LLMWrapper("llama_model/dolphin-2.9-llama3-8b-q8_0.gguf")
 
 if __name__ == "__main__":
-    # Load existing memory at the start
-    llm_wrapper.load_memory()
-
-    prompt = ""
+    prompt = "Hi Akane, do you remember my name?"
     print(f"Processing prompt: {prompt}")
     response = llm_wrapper.generate_response(prompt)
     print("\nGenerated output:")

@@ -14,7 +14,7 @@ from galaxy_brain_math_shit import (
     hyper_SVM_ranking_algorithm_sort,
 )
 
-EMBEDDING_MODEL = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2', device = 'cuda:0' if torch.cuda.is_available() else 'cpu')
+EMBEDDING_MODEL = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2', device = 'cuda:0')
 
 def get_embedding(documents, key=None, model="text-embedding-ada-002"):
     """Default embedding function that uses OpenAI Embeddings."""
