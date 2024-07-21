@@ -4,6 +4,7 @@ import logging
 import requests
 from llama_cpp import Llama
 from llm_axe.core import internet_search, read_website
+from memory import Memory  # Import the Memory class
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -36,6 +37,9 @@ class LLMWrapper:
         self.model_path = model_path
         self.llm = None
         self.llama_wrapper = None
+        self.memory = Memory()  # Initialize the Memory instance
+        self.assistant_name = "Akane"
+        self.assistant_role = "virtual assistant"
 
     def initialize(self):
         if self.llm is None:
@@ -48,35 +52,29 @@ class LLMWrapper:
 
     def classify_query(self, query):
         classification_prompt = f"""
-        Classify the following query as 'online' or 'local' based on these criteria:
-
-        Online:
-        - Requires up-to-date information (e.g., current events, weather, stock prices)
-        - Asks for specific web content or links
-        - Requires information about recent or upcoming events
-        - Involves searching for or comparing products or services
-        - Needs information about a specific person, place, or thing that may not be in a general knowledge base
-
-        Local:
-        - General knowledge questions
-        - Mathematical calculations or problem-solving
-        - Language-related tasks (translation, grammar, etc.)
-        - Coding help or explanations
-        - Hypothetical scenarios or creative tasks
-        - Personal advice or opinions (that don't require current data)
+        As {self.assistant_name}, a {self.assistant_role}, classify the following query into one of these categories:
+        1. 'personal': Related to your identity, capabilities, or assistant-specific information
+        2. 'local': simple tasks that can be handled with existing information
+        3. 'online': 
+            - Requires up-to-date or specific information from the internet (eg. current events, weather, stock prices etc.)
+            - Ask for specific web content or links
+            - Requires information about recent or upcoming events or has the date/time in the query
+            - Involves searching for or comparing products or services
+            - Needs information about a specfic person, place or thing, that is not general knowledge, and is not about you or the user. (eg. "Who is the CEO of Google?", "What is the capital of France?")
 
         Query: "{query}"
 
-        Classification (online/local):
+        Classification (personal/local/online):
         Explanation:
         """
         response = self.ask([{'role': 'user', 'content': classification_prompt}], temperature=0.3).strip()
         
-        # Extract classification and explanation
         classification = 'local'  # Default to local
         explanation = ''
         
-        if 'online' in response.lower():
+        if 'personal' in response.lower():
+            classification = 'personal'
+        elif 'online' in response.lower():
             classification = 'online'
         
         explanation_match = re.search(r'Explanation:(.*)', response, re.DOTALL)
@@ -94,22 +92,54 @@ class LLMWrapper:
 
         query_type, explanation = self.classify_query(user_input)
 
-        if query_type == "online":
+        # Retrieve relevant context from memory
+        context = self.memory.get_relevant_context(user_input)
+        
+        # Prepare the prompt with context
+        prompt_with_context = f"""As {self.assistant_name}, a {self.assistant_role}, respond to the following input:
+
+Context from previous conversations:
+{context}
+
+User input:
+{user_input}
+
+Response:"""
+
+        if query_type == "personal":
+            logger.info(f"Personal query detected: {explanation}")
+            response = self.perform_personal_query(prompt_with_context)
+        elif query_type == "online":
             logger.info(f"Online query detected: {explanation}")
-            return self.perform_online_search(user_input)
+            response = self.perform_online_search(prompt_with_context)
         else:
             logger.info(f"Local query detected: {explanation}")
-            return self.perform_local_query(user_input)
+            response = self.perform_local_query(prompt_with_context)
 
-    def perform_local_query(self, user_input):
-        local_response = self.get_local_knowledge_response(user_input)
-        
-        if "I don't have enough reliable information" not in local_response:
-            logger.info("Local knowledge response found.")
-            return f"[Using local knowledge] {local_response}"
+        # Save the interaction to memory
+        self.memory.add_to_conversation("user", user_input)
+        self.memory.add_to_conversation("assistant", response)
+        self.memory.save_current_conversation()
 
-        logger.info("Local knowledge response insufficient, attempting online search...")
-        return self.perform_online_search(user_input)
+        # Append the new conversation to the existing memory file
+        try:
+            self.memory.append_to_file("conversation_history.gz")
+        except Exception as e:
+            logger.error(f"Error appending to memory file: {e}")
+            # Optionally, you can add a fallback method here, such as:
+            # self.memory.save_to_file("conversation_history_new.gz")
+
+        return response
+
+    def perform_personal_query(self, prompt):
+        personal_response = self.get_personal_response(prompt)
+        logger.info("Personal response generated.")
+        return f"[As {self.assistant_name}] {personal_response}"
+
+    def perform_local_query(self, prompt):
+        local_response = self.get_local_knowledge_response(prompt)
+        logger.info("Local knowledge response generated.")
+        return f"[Using local knowledge] {local_response}"
 
     def perform_online_search(self, user_input):
         try:
@@ -121,9 +151,10 @@ class LLMWrapper:
                 return f"[Using online search] {online_response}"
             else:
                 logger.info("No valid online information found.")
+                return self.perform_local_query(user_input)  # Fallback to local query if online search fails
         except Exception as e:
             logger.error(f"Error during online search: {e}", exc_info=True)
-        return "I couldn't retrieve information from the internet."
+            return self.perform_local_query(user_input)  # Fallback to local query if online search fails
 
     @staticmethod
     def extract_url(text):
@@ -178,10 +209,10 @@ Extracted Information:"""
 
         return self.ask([{'role': 'user', 'content': prompt}], temperature=0.3).strip()
 
-    def get_local_knowledge_response(self, user_input):
-        local_prompt = f"""You are a knowledgeable assistant with expertise in various fields. Please answer the following question to the best of your ability:
+    def get_local_knowledge_response(self, prompt):
+        local_prompt = f"""As {self.assistant_name}, a {self.assistant_role}, answer the following question to the best of your ability:
 
-Question: {user_input}
+{prompt}
 
 Instructions:
 1. If you are certain about the answer, provide it directly and completely.
@@ -197,11 +228,42 @@ Answer:"""
         
         return local_response.strip() or "I don't have enough reliable information to answer this question accurately."
 
+    def get_personal_response(self, prompt):
+        personal_prompt = f"""As {self.assistant_name}, a {self.assistant_role}, respond to the following:
+
+{prompt}
+
+Instructions:
+1. Maintain the persona of {self.assistant_name}, the {self.assistant_role}.
+2. If asked about your capabilities or identity, respond accordingly.
+3. If you don't have specific information about past conversations, politely explain that you don't have access to that information.
+4. Be helpful and friendly in your responses.
+
+Response:"""
+
+        personal_response = self.ask([{'role': 'user', 'content': personal_prompt}], temperature=0.5)
+        logger.debug(f"Personal response: {personal_response}")
+        
+        return personal_response.strip()
+
+    def save_memory(self, filename="conversation_history.gz"):
+        """Append the current state of the memory to the existing file."""
+        self.memory.append_to_file(filename)
+        logger.info(f"Memory appended to {filename}")
+
+    def load_memory(self, filename="conversation_history.gz"):
+        """Load the state of the memory from a file."""
+        self.memory.load_from_file(filename)
+        logger.info(f"Memory loaded from {filename}")
+
 # Create a global instance
 llm_wrapper = LLMWrapper("llama_model/dolphin-2.9-llama3-8b-q8_0.gguf")
 
 if __name__ == "__main__":
-    prompt = "You are to role play as Akane Kurokawa from oshi no ko. I am your biggest fan asking for an autograph and picture. Please respond."
+    # Load existing memory at the start
+    llm_wrapper.load_memory()
+
+    prompt = ""
     print(f"Processing prompt: {prompt}")
     response = llm_wrapper.generate_response(prompt)
     print("\nGenerated output:")
