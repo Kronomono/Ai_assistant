@@ -1,4 +1,3 @@
-# transcribe.py
 import os
 from transformers import WhisperProcessor
 from my_utils import load_whisper_model, extract_audio, transcribe_audio

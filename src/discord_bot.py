@@ -16,10 +16,10 @@ load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
 # Define the master's username
-MASTER_USERNAME = "kronomono"
+MASTER_USERNAME = os.getenv("MASTER_USERNAME")
 
 # Directory to save audio messages
-AUDIO_DIR = "discord_audio_message"
+AUDIO_DIR = os.getenv("AUDIO_DIR")
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
 # Intents to allow the bot to read messages and be aware of mentions

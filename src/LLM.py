@@ -37,7 +37,7 @@ class LLMWrapper:
         self.model_path = model_path
         self.llm = None
         self.llama_wrapper = None
-        self.memory = Memory()  # Initialize the new Memory class
+        self.memory = Memory()  
         self.assistant_name = "Akane"
         self.assistant_role = "virtual assistant"
 
@@ -69,7 +69,7 @@ class LLMWrapper:
         """
         response = self.ask([{'role': 'user', 'content': classification_prompt}], temperature=0.3).strip()
         
-        classification = 'local'  # Default to local
+        classification = 'local'  
         explanation = ''
         
         if 'personal' in response.lower():
