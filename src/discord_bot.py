@@ -7,7 +7,7 @@ from pydub import AudioSegment
 from transcribe import WhisperTranscriber
 from my_utils import load_whisper_model
 from transformers import WhisperProcessor
-from LLM import llm_wrapper
+from LLM import llm_wrapper  # Import the llm_wrapper from LLM.py
 
 # Load environment variables from .env file
 load_dotenv()
@@ -109,10 +109,17 @@ class MyClient(Client):
     async def process_text_command(self, text, channel):
         loop = asyncio.get_running_loop()
         try:
-            prompt = f"User input: {text}\nRespond to this input:"
-            generated_text = await loop.run_in_executor(None, lambda: llm_wrapper.generate_response(prompt))
+            # Use the llm_wrapper to generate a response
+            full_response = await loop.run_in_executor(None, llm_wrapper.generate_response, text)
             
-            await channel.send(f"Akane's response: {generated_text}")
+            # Split the response if it's too long for a single Discord message
+            max_length = 2000  # Discord's maximum message length
+            response_parts = [full_response[i:i+max_length] for i in range(0, len(full_response), max_length)]
+            print(f"DEBUG: Received response from LLM: {full_response}")
+            
+            # Send the response back to the Discord channel in parts if necessary
+            for part in response_parts:
+                await channel.send(part)
         except Exception as e:
             await channel.send(f"Error processing with LLM: {e}")
 

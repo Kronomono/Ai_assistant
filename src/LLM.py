@@ -2,9 +2,10 @@ import re
 import json
 import logging
 import requests
+import torch
 from llama_cpp import Llama
 from llm_axe.core import internet_search, read_website
-from memory import Memory  
+from memory import Memory
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -15,8 +16,11 @@ class LlamaWrapper:
 
     def ask(self, prompts, format="", temperature=0.7):
         prompt = " ".join([p["content"] for p in prompts])
+        logger.debug(f"Sending prompt to Llama: {prompt}")
         output = self.llama(prompt, max_tokens=2048, temperature=temperature, top_p=0.9, echo=False)
+        logger.debug(f"Raw output from Llama: {output}")
         response = output['choices'][0]['text'].strip()
+        logger.debug(f"Stripped response: {response}")
 
         return self.parse_json_response(response) if format == "json" else response
 
@@ -37,18 +41,29 @@ class LLMWrapper:
         self.model_path = model_path
         self.llm = None
         self.llama_wrapper = None
-        self.memory = Memory()  
+        self.memory = Memory()
         self.assistant_name = "Akane"
         self.assistant_role = "virtual assistant"
 
     def initialize(self):
         if self.llm is None:
-            self.llm = Llama(model_path=self.model_path, n_ctx=2048, n_batch=512, n_gpu_layers=-1, verbose=False)
+            logger.info("Initializing LLM...")
+            gpu_layers = -1 if torch.cuda.is_available() else 0
+            logger.info(f"Using GPU layers: {gpu_layers}")
+            self.llm = Llama(model_path=self.model_path, n_ctx=2048, n_batch=512, n_gpu_layers=gpu_layers, verbose=True)
             self.llama_wrapper = LlamaWrapper(self.llm)
+            logger.info("LLM initialized successfully.")
 
     def ask(self, prompts: list, format: str = "", temperature: float = 0.7):
         self.initialize()
         return self.llama_wrapper.ask(prompts, format, temperature)
+    
+    def close(self):
+        if self.llm is not None:
+            del self.llm
+            self.llm = None
+            self.llama_wrapper = None
+            logger.info("LLM resources released.")
 
     def classify_query(self, query):
         classification_prompt = f"""
@@ -60,7 +75,7 @@ class LLMWrapper:
             - Ask for specific web content or links
             - Requires information about recent or upcoming events or has the date/time in the query
             - Involves searching for or comparing products or services
-            - Needs information about a specfic person, place or thing, that is not general knowledge, and is not about you or the user. (eg. "Who is the CEO of Google?", "What is the capital of France?")
+            - Needs information about a specific person, place or thing, that is not general knowledge, and is not about you or the user. (eg. "Who is the CEO of Google?", "What is the capital of France?")
 
         Query: "{query}"
 
@@ -69,7 +84,7 @@ class LLMWrapper:
         """
         response = self.ask([{'role': 'user', 'content': classification_prompt}], temperature=0.3).strip()
         
-        classification = 'local'  
+        classification = 'local'
         explanation = ''
         
         if 'personal' in response.lower():
@@ -92,10 +107,8 @@ class LLMWrapper:
 
         query_type, explanation = self.classify_query(user_input)
 
-        # Retrieve relevant context from memory
         context = self.memory.get_relevant_context(user_input)
         
-        # Prepare the prompt with context
         prompt_with_context = f"""As {self.assistant_name}, a {self.assistant_role}, respond to the following input:
 
 Context from previous conversations:
@@ -116,22 +129,33 @@ Response:"""
             logger.info(f"Local query detected: {explanation}")
             response = self.perform_local_query(prompt_with_context)
 
-        # Save the interaction to memory
+        if not response or response.strip() == f"[As {self.assistant_name}]":
+            logger.warning("Empty response generated. Falling back to local query.")
+            response = self.perform_local_query(prompt_with_context)
+
         self.memory.add_conversation([
             {"role": "user", "content": user_input},
             {"role": "assistant", "content": response}
         ])
 
+        logger.debug(f"DEBUG: LLM generated response: {response}")
+        
         return response
 
     def perform_personal_query(self, prompt):
         personal_response = self.get_personal_response(prompt)
         logger.info("Personal response generated.")
+        if not personal_response.strip():
+            logger.warning("Empty personal response. Falling back to local query.")
+            return self.perform_local_query(prompt)
         return f"[As {self.assistant_name}] {personal_response}"
 
     def perform_local_query(self, prompt):
         local_response = self.get_local_knowledge_response(prompt)
         logger.info("Local knowledge response generated.")
+        if not local_response.strip():
+            logger.warning("Empty local response. Generating a default response.")
+            return f"[Using local knowledge] I apologize, but I couldn't generate a proper response. How else may I assist you?"
         return f"[Using local knowledge] {local_response}"
 
     def perform_online_search(self, user_input):
@@ -144,10 +168,10 @@ Response:"""
                 return f"[Using online search] {online_response}"
             else:
                 logger.info("No valid online information found.")
-                return self.perform_local_query(user_input)  # Fallback to local query if online search fails
+                return self.perform_local_query(user_input)
         except Exception as e:
             logger.error(f"Error during online search: {e}", exc_info=True)
-            return self.perform_local_query(user_input)  # Fallback to local query if online search fails
+            return self.perform_local_query(user_input)
 
     @staticmethod
     def extract_url(text):
@@ -170,7 +194,7 @@ Response:"""
         logger.info("Performing general search...")
         search_results = internet_search(user_input)
         if search_results:
-            for result in search_results[:5]:  # Check top 5 results
+            for result in search_results[:5]:
                 response = self.process_specific_url(result.get('url', ''), user_input)
                 if response:
                     return response
@@ -188,7 +212,7 @@ Response:"""
         prompt = f"""Extract the most relevant information from the following content to answer this question: "{question}"
 
 Content:
-{content[:5000]}  # Limit content to 5000 characters
+{content[:5000]}
 
 Instructions:
 1. Extract only factual information directly related to the question.
@@ -213,6 +237,7 @@ Instructions:
 3. Include specific details, numbers, or names if the question asks for them.
 4. If you don't have enough information to answer accurately, say "I don't have enough reliable information to answer this question accurately."
 5. Do not make up or guess at information you're not confident about. It's better to express uncertainty than to provide potentially incorrect information.
+6. Always provide a substantive response, even if it's to express uncertainty.
 
 Answer:"""
 
@@ -231,6 +256,7 @@ Instructions:
 2. If asked about your capabilities or identity, respond accordingly.
 3. If you don't have specific information about past conversations, politely explain that you don't have access to that information.
 4. Be helpful and friendly in your responses.
+5. IMPORTANT: Always provide a substantive response. Never return an empty response.
 
 Response:"""
 
@@ -243,7 +269,7 @@ Response:"""
 llm_wrapper = LLMWrapper("llama_model/dolphin-2.9-llama3-8b-q8_0.gguf")
 
 if __name__ == "__main__":
-    prompt = "Hi Akane, do you remember my name?"
+    prompt = "Hi Akane, my name is Matthew it is nice to meet you!"
     print(f"Processing prompt: {prompt}")
     response = llm_wrapper.generate_response(prompt)
     print("\nGenerated output:")
@@ -251,3 +277,7 @@ if __name__ == "__main__":
 
     print("\nDebug Information:")
     print(f"LLM initialized: {llm_wrapper.llm is not None}")
+    print(f"CUDA available: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"CUDA device: {torch.cuda.get_device_name(0)}")
+    llm_wrapper.close()
