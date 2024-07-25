@@ -231,7 +231,7 @@ Extracted Information:"""
 llm_wrapper = LLMWrapper(os.getenv("LLM_MODEL_PATH"))
 
 if __name__ == "__main__":
-    prompt = "Hey Akane, sorry to bother you again. What time is it now? would it be considered morning or night?"
+    prompt = "Hey Akane, sorry to bother you again. But could you recall the details of our last conversation. Specifically about pokemon and cosmog?"
     print(f"Processing prompt: {prompt}")
     response = llm_wrapper.generate_response(prompt)
     print("\nGenerated output:")
