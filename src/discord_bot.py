@@ -29,8 +29,8 @@ intents.message_content = True
 intents.members = True  # Enable member intents
 
 # Load the Whisper model and processor
-model_name = "openai/whisper-large-v2"
-model_path = "whisper_models/large_model_v2.safetensors"
+model_name = os.getenv("WHISPER_MODEL_NAME")
+model_path = os.getenv("WHISPER_MODEL_PATH")
 whisper_model = load_whisper_model(model_name, model_path)
 processor = WhisperProcessor.from_pretrained(model_name)
 

@@ -1,5 +1,7 @@
 import re
 import json
+import os
+from dotenv import load_dotenv
 import logging
 import requests
 import torch
@@ -8,8 +10,10 @@ from llm_axe.core import internet_search, read_website
 from memory import Memory
 from datetime import datetime
 
+load_dotenv()
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
 
 class LlamaWrapper:
     def __init__(self, llama_model):
@@ -43,8 +47,8 @@ class LLMWrapper:
         self.llm = None
         self.llama_wrapper = None
         self.memory = Memory()
-        self.assistant_name = "Akane"
-        self.assistant_role = "virtual assistant"
+        self.assistant_name = os.getenv('NAME_OF_BOT', 'Akane')  
+        self.assistant_role = os.getenv('ROLE_OF_BOT', 'virtual assistant')  
 
     def initialize(self):
         if self.llm is None:
@@ -224,10 +228,10 @@ Extracted Information:"""
         return self.ask([{'role': 'user', 'content': prompt}], temperature=0.3).strip()
 
 # Create a global instance
-llm_wrapper = LLMWrapper("llama_model/dolphin-2.9-llama3-8b-q8_0.gguf")
+llm_wrapper = LLMWrapper(os.getenv("LLM_MODEL_PATH"))
 
 if __name__ == "__main__":
-    prompt = "Hey Akane, remind me what date and time did we have our first conversation?"
+    prompt = "Hey Akane, sorry to bother you again. What time is it now? would it be considered morning or night?"
     print(f"Processing prompt: {prompt}")
     response = llm_wrapper.generate_response(prompt)
     print("\nGenerated output:")
