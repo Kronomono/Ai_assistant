@@ -6,6 +6,7 @@ import torch
 from llama_cpp import Llama
 from llm_axe.core import internet_search, read_website
 from memory import Memory
+from datetime import datetime
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -68,18 +69,16 @@ class LLMWrapper:
     def classify_query(self, query):
         classification_prompt = f"""
         As {self.assistant_name}, a {self.assistant_role}, classify the following query into one of these categories:
-        1. 'personal': Related to your identity, capabilities, or assistant-specific information
-        2. 'local': simple tasks that can be handled with existing information
-        3. 'online': 
-            - Requires up-to-date or specific information from the internet (eg. current events, weather, stock prices etc.)
+        1. 'local': Can be handled with existing information or assistant capabilities
+        2. 'online': - Requires up-to-date or specific information from the internet (eg. current news events, weather, stock prices etc.)
             - Ask for specific web content or links
-            - Requires information about recent or upcoming events or has the date/time in the query
+            - Requires information about recent or upcoming events
             - Involves searching for or comparing products or services
             - Needs information about a specific person, place or thing, that is not general knowledge, and is not about you or the user. (eg. "Who is the CEO of Google?", "What is the capital of France?")
 
         Query: "{query}"
 
-        Classification (personal/local/online):
+        Classification (local/online):
         Explanation:
         """
         response = self.ask([{'role': 'user', 'content': classification_prompt}], temperature=0.3).strip()
@@ -87,9 +86,7 @@ class LLMWrapper:
         classification = 'local'
         explanation = ''
         
-        if 'personal' in response.lower():
-            classification = 'personal'
-        elif 'online' in response.lower():
+        if 'online' in response.lower():
             classification = 'online'
         
         explanation_match = re.search(r'Explanation:(.*)', response, re.DOTALL)
@@ -109,80 +106,77 @@ class LLMWrapper:
 
         context = self.memory.get_relevant_context(user_input)
         
-        prompt_with_context = f"""As {self.assistant_name}, a {self.assistant_role}, respond to the following input:
-
-Context from previous conversations:
-{context}
-
-User input:
-{user_input}
-
-Response:"""
-
-        if query_type == "personal":
-            logger.info(f"Personal query detected: {explanation}")
-            response = self.perform_personal_query(prompt_with_context)
-        elif query_type == "online":
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        if query_type == "online":
             logger.info(f"Online query detected: {explanation}")
-            response = self.perform_online_search(prompt_with_context)
+            response = self.perform_online_search(user_input, current_time)
         else:
             logger.info(f"Local query detected: {explanation}")
-            response = self.perform_local_query(prompt_with_context)
-
-        if not response or response.strip() == f"[As {self.assistant_name}]":
-            logger.warning("Empty response generated. Falling back to local query.")
-            response = self.perform_local_query(prompt_with_context)
+            response = self.perform_local_query(user_input, context, current_time)
 
         self.memory.add_conversation([
-            {"role": "user", "content": user_input},
-            {"role": "assistant", "content": response}
+            {"role": "user", "content": user_input, "timestamp": current_time},
+            {"role": "assistant", "content": response, "timestamp": current_time}
         ])
 
         logger.debug(f"DEBUG: LLM generated response: {response}")
         
         return response
 
-    def perform_personal_query(self, prompt):
-        personal_response = self.get_personal_response(prompt)
-        logger.info("Personal response generated.")
-        if not personal_response.strip():
-            logger.warning("Empty personal response. Falling back to local query.")
-            return self.perform_local_query(prompt)
-        return f"[As {self.assistant_name}] {personal_response}"
+    def perform_local_query(self, user_input, context, current_time):
+        prompt = f"""As {self.assistant_name}, a {self.assistant_role}, respond to the following input:
 
-    def perform_local_query(self, prompt):
-        local_response = self.get_local_knowledge_response(prompt)
-        logger.info("Local knowledge response generated.")
-        if not local_response.strip():
-            logger.warning("Empty local response. Generating a default response.")
-            return f"[Using local knowledge] I apologize, but I couldn't generate a proper response. How else may I assist you?"
-        return f"[Using local knowledge] {local_response}"
+Context from previous conversations:
+{context}
 
-    def perform_online_search(self, user_input):
+Current date and time: {current_time}
+
+User input:
+{user_input}
+
+Instructions:
+1. Maintain the persona of {self.assistant_name}, the {self.assistant_role}.
+2. If asked about your capabilities or identity, respond accordingly.
+3. If you don't have specific information about past conversations, use the provided context.
+4. Be helpful, friendly, and confident in your responses.
+5. If you don't have enough information to answer accurately, say so politely.
+6. Always provide a substantive response.
+7. Use the current date and time information when relevant to the query.
+8. If asked about the current time or date, respond using the provided current date and time.
+
+Response:"""
+
+        local_response = self.ask([{'role': 'user', 'content': prompt}], temperature=0.5)
+        logger.debug(f"Local/Personal response: {local_response}")
+        
+        return local_response.strip()
+
+    def perform_online_search(self, user_input, current_time):
         try:
             url = self.extract_url(user_input)
-            online_response = self.process_specific_url(url, user_input) if url else self.enhanced_online_search(user_input)
+            online_response = self.process_specific_url(url, user_input, current_time) if url else self.enhanced_online_search(user_input, current_time)
             
             if online_response:
                 logger.info("Valid online information found.")
-                return f"[Using online search] {online_response}"
+                return online_response
             else:
                 logger.info("No valid online information found.")
-                return self.perform_local_query(user_input)
+                return self.perform_local_query(user_input, "", current_time)
         except Exception as e:
             logger.error(f"Error during online search: {e}", exc_info=True)
-            return self.perform_local_query(user_input)
+            return self.perform_local_query(user_input, "", current_time)
 
     @staticmethod
     def extract_url(text):
         url_match = re.search(r'https?://\S+', text)
         return url_match.group() if url_match else None
 
-    def process_specific_url(self, url, user_input):
+    def process_specific_url(self, url, user_input, current_time):
         try:
             page_content = self.safe_read_website(url)
             if page_content:
-                extracted_info = self.extract_information(page_content, user_input)
+                extracted_info = self.extract_information(page_content, user_input, current_time)
                 logger.info(f"Extracted information from {url}: {extracted_info}")
                 if extracted_info and "No relevant information found" not in extracted_info:
                     return f"Based on {url}, {extracted_info}"
@@ -190,12 +184,12 @@ Response:"""
             logger.error(f"Error processing URL {url}: {e}")
         return None
 
-    def enhanced_online_search(self, user_input):
+    def enhanced_online_search(self, user_input, current_time):
         logger.info("Performing general search...")
         search_results = internet_search(user_input)
         if search_results:
             for result in search_results[:5]:
-                response = self.process_specific_url(result.get('url', ''), user_input)
+                response = self.process_specific_url(result.get('url', ''), user_input, current_time)
                 if response:
                     return response
         return None
@@ -208,11 +202,13 @@ Response:"""
             logger.error(f"Error reading website {url}: {e}")
             return None
 
-    def extract_information(self, content, question):
+    def extract_information(self, content, question, current_time):
         prompt = f"""Extract the most relevant information from the following content to answer this question: "{question}"
 
 Content:
 {content[:5000]}
+
+Current date and time: {current_time}
 
 Instructions:
 1. Extract only factual information directly related to the question.
@@ -221,55 +217,17 @@ Instructions:
 4. If a complete list or description is available, provide it in full.
 5. If no relevant information is found, state "No relevant information found."
 6. Do not infer or generate information not present in the content.
+7. Use the current date and time information when relevant to the query.
 
 Extracted Information:"""
 
         return self.ask([{'role': 'user', 'content': prompt}], temperature=0.3).strip()
 
-    def get_local_knowledge_response(self, prompt):
-        local_prompt = f"""As {self.assistant_name}, a {self.assistant_role}, answer the following question to the best of your ability:
-
-{prompt}
-
-Instructions:
-1. If you are certain about the answer, provide it directly and completely.
-2. If you have relevant information but are not certain, provide the information and clearly state your level of confidence.
-3. Include specific details, numbers, or names if the question asks for them.
-4. If you don't have enough information to answer accurately, say "I don't have enough reliable information to answer this question accurately."
-5. Do not make up or guess at information you're not confident about. It's better to express uncertainty than to provide potentially incorrect information.
-6. Always provide a substantive response, even if it's to express uncertainty.
-
-Answer:"""
-
-        local_response = self.ask([{'role': 'user', 'content': local_prompt}], temperature=0.3)
-        logger.debug(f"Local knowledge response: {local_response}")
-        
-        return local_response.strip() or "I don't have enough reliable information to answer this question accurately."
-
-    def get_personal_response(self, prompt):
-        personal_prompt = f"""As {self.assistant_name}, a {self.assistant_role}, respond to the following:
-
-{prompt}
-
-Instructions:
-1. Maintain the persona of {self.assistant_name}, the {self.assistant_role}.
-2. If asked about your capabilities or identity, respond accordingly.
-3. If you don't have specific information about past conversations, politely explain that you don't have access to that information.
-4. Be helpful and friendly in your responses.
-5. IMPORTANT: Always provide a substantive response. Never return an empty response.
-
-Response:"""
-
-        personal_response = self.ask([{'role': 'user', 'content': personal_prompt}], temperature=0.5)
-        logger.debug(f"Personal response: {personal_response}")
-        
-        return personal_response.strip()
-
 # Create a global instance
 llm_wrapper = LLMWrapper("llama_model/dolphin-2.9-llama3-8b-q8_0.gguf")
 
 if __name__ == "__main__":
-    prompt = "Hi Akane, my name is Matthew it is nice to meet you!"
+    prompt = "Hey Akane, remind me what date and time did we have our first conversation?"
     print(f"Processing prompt: {prompt}")
     response = llm_wrapper.generate_response(prompt)
     print("\nGenerated output:")

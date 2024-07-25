@@ -58,17 +58,17 @@ class Memory:
     def add_conversation(self, conversation: List[Dict[str, str]]):
         db = self._get_db_connection()
         try:
-            full_conversation = " ".join([f"{msg['role']}: {msg['content']}" for msg in conversation])
-            date = datetime.now().date()
+            full_conversation = " ".join([f"{msg['role']} ({msg['timestamp']}): {msg['content']}" for msg in conversation])
+            date = datetime.strptime(conversation[-1]['timestamp'], "%Y-%m-%d %H:%M:%S").date()
             
             file_path = self._get_db_file_for_date(date)
             if os.path.exists(file_path):
                 db.load(file_path)
             
-            db.add({"conversation": full_conversation, "date": str(date)})
+            db.add({"conversation": full_conversation, "date": str(date), "timestamp": conversation[-1]['timestamp']})
             db.save(file_path)
             
-            self._log_transaction('add', {'date': str(date)})
+            self._log_transaction('add', {'date': str(date), 'timestamp': conversation[-1]['timestamp']})
         except Exception as e:
             self._log_transaction('error', {'operation': 'add', 'error': str(e)})
             raise
@@ -104,7 +104,7 @@ class Memory:
         relevant_memories = self.query_memory(query, top_k=top_k)
         if not relevant_memories:
             return ""
-        context = "\n\n".join([f"Past conversation (similarity: {float(m[1]):.2f}):\n{m[0]['conversation']}" for m in relevant_memories])
+        context = "\n\n".join([f"Past conversation (timestamp: {m[0]['timestamp']}, similarity: {float(m[1]):.2f}):\n{m[0]['conversation']}" for m in relevant_memories])
         return context
 
     def clear_memory(self):
