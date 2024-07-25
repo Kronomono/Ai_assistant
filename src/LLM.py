@@ -47,8 +47,8 @@ class LLMWrapper:
         self.llm = None
         self.llama_wrapper = None
         self.memory = Memory()
-        self.assistant_name = os.getenv('NAME_OF_BOT', 'Akane')  
-        self.assistant_role = os.getenv('ROLE_OF_BOT', 'virtual assistant')  
+        self.name = os.getenv('NAME_OF_BOT')  
+        self.role = os.getenv('ROLE_OF_BOT')  
 
     def initialize(self):
         if self.llm is None:
@@ -72,7 +72,7 @@ class LLMWrapper:
 
     def classify_query(self, query):
         classification_prompt = f"""
-        As {self.assistant_name}, a {self.assistant_role}, classify the following query into one of these categories:
+        As {self.name}, a {self.role}, classify the following query into one of these categories:
         1. 'local': Can be handled with existing information or assistant capabilities
         2. 'online': - Requires up-to-date or specific information from the internet (eg. current news events, weather, stock prices etc.)
             - Ask for specific web content or links
@@ -121,7 +121,7 @@ class LLMWrapper:
 
         self.memory.add_conversation([
             {"role": "user", "content": user_input, "timestamp": current_time},
-            {"role": "assistant", "content": response, "timestamp": current_time}
+            {"role": {self.role}, "content": response, "timestamp": current_time}
         ])
 
         logger.debug(f"DEBUG: LLM generated response: {response}")
@@ -129,7 +129,7 @@ class LLMWrapper:
         return response
 
     def perform_local_query(self, user_input, context, current_time):
-        prompt = f"""As {self.assistant_name}, a {self.assistant_role}, respond to the following input:
+        prompt = f"""As {self.name}, a {self.role}, respond to the following input:
 
 Context from previous conversations:
 {context}
@@ -140,14 +140,13 @@ User input:
 {user_input}
 
 Instructions:
-1. Maintain the persona of {self.assistant_name}, the {self.assistant_role}.
+1. Maintain the persona of {self.name}, the {self.role}.
 2. If asked about your capabilities or identity, respond accordingly.
-3. If you don't have specific information about past conversations, use the provided context.
+3. If you don't have enough information to answer the query, state that clearly.
 4. Be helpful, friendly, and confident in your responses.
-5. If you don't have enough information to answer accurately, say so politely.
-6. Always provide a substantive response.
-7. Use the current date and time information when relevant to the query.
-8. If asked about the current time or date, respond using the provided current date and time.
+5. Always provide a substantive response.
+6. Use the current date and time information when relevant to the query.
+
 
 Response:"""
 
@@ -231,7 +230,7 @@ Extracted Information:"""
 llm_wrapper = LLMWrapper(os.getenv("LLM_MODEL_PATH"))
 
 if __name__ == "__main__":
-    prompt = "Hey Akane, sorry to bother you again. But could you recall the details of our last conversation. Specifically about pokemon and cosmog?"
+    prompt = "Hey Akane, can you tell me what date today is? and what will be the date next week? and if that date is a thursday or not?"
     print(f"Processing prompt: {prompt}")
     response = llm_wrapper.generate_response(prompt)
     print("\nGenerated output:")
