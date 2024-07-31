@@ -73,7 +73,7 @@ class LLMWrapper:
     def classify_query(self, query):
         classification_prompt = f"""
         As {self.name}, a {self.role}, classify the following query into one of these categories:
-        1. 'local': Can be handled with existing information or assistant capabilities
+        1. 'local': Can be handled with existing information or {self.role} capabilities
         2. 'online': - Requires up-to-date or specific information from the internet (eg. current news events, weather, stock prices etc.)
             - Ask for specific web content or links
             - Requires information about recent or upcoming events
@@ -143,7 +143,7 @@ Instructions:
 1. Maintain the persona of {self.name}, the {self.role}.
 2. If asked about your capabilities or identity, respond accordingly.
 3. If you don't have enough information to answer the query, state that clearly.
-4. Be helpful, friendly, and confident in your responses.
+4. Response as a {self.role}, and be confident in your responses.
 5. Always provide a substantive response.
 6. Use the current date and time information when relevant to the query.
 
@@ -230,7 +230,7 @@ Extracted Information:"""
 llm_wrapper = LLMWrapper(os.getenv("LLM_MODEL_PATH"))
 
 if __name__ == "__main__":
-    prompt = "Hey Akane, can you tell me what date today is? and what will be the date next week? and if that date is a thursday or not?"
+    prompt = "Hello Akane, I am your creator Matthew. Its nice to meet you."
     print(f"Processing prompt: {prompt}")
     response = llm_wrapper.generate_response(prompt)
     print("\nGenerated output:")
