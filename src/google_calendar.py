@@ -10,8 +10,8 @@ load_dotenv()
 
 class GoogleCalendarManager:
     def __init__(self):
-        credentials_path = os.getenv('GOOGLE_CALENDAR_CREDENTIALS_PATH')
-        self.calendar = GoogleCalendar(credentials_path=credentials_path)
+        credentials = os.getenv('GOOGLE_CALENDAR_CREDENTIALS')
+        self.calendar = GoogleCalendar(credentials_path=credentials)
 
     def list_calendars(self):
         calendars = self.calendar.get_calendars()
