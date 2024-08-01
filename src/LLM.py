@@ -9,7 +9,7 @@ from llama_cpp import Llama
 from llm_axe.core import internet_search, read_website
 from memory import Memory
 from datetime import datetime
-from google_calendar import GoogleCalendarManager
+
 
 # Load environment variables
 load_dotenv()
@@ -25,7 +25,7 @@ class LLMWrapper:
         self.memory = Memory()
         self.name = os.getenv('NAME_OF_BOT')
         self.role = os.getenv('ROLE_OF_BOT')
-        self.google_calendar = GoogleCalendarManager()
+        
 
     def initialize(self):
         if self.llm is None:
@@ -44,20 +44,8 @@ class LLMWrapper:
         response = output['choices'][0]['text'].strip()
         logger.debug(f"Stripped response: {response}")
 
-        return self.parse_json_response(response) if format == "json" else response
-
-    def parse_json_response(self, response):
-        try:
-            return json.dumps(json.loads(response))
-        except json.JSONDecodeError:
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
-            if json_match:
-                try:
-                    return json.dumps(json.loads(json_match.group()))
-                except json.JSONDecodeError:
-                    pass
-            return json.dumps({"response": response})
-
+        return response
+    
     def close(self):
         if self.llm is not None:
             del self.llm
@@ -73,11 +61,11 @@ class LLMWrapper:
             - Requires information about recent or specific events
             - Involves searching for or comparing products or services
             - Needs information about a specific person, place or thing, that is not general knowledge, and is not about you or the user. (eg. "Who is the CEO of Google?", "What is the capital of France?")
-        3. 'google_calendar': Involves managing events, reminders, schedules, or querying using Google Calendar
+        
 
         Query: "{query}"
 
-        Classification (local/online/google_calendar):
+        Classification (local/online):
         Explanation:
         """
         response = self.ask([{'role': 'user', 'content': classification_prompt}], temperature=0.3).strip()
@@ -87,8 +75,7 @@ class LLMWrapper:
         
         if 'online' in response.lower():
             classification = 'online'
-        elif 'google_calendar' in response.lower():
-            classification = 'google_calendar'
+       
         
         explanation_match = re.search(r'Explanation:(.*)', response, re.DOTALL)
         if explanation_match:
@@ -109,9 +96,7 @@ class LLMWrapper:
         if query_type == "online":
             logger.info(f"Online query detected: {explanation}")
             response = self.perform_online_search(user_input, current_time)
-        elif query_type == "google_calendar":
-            logger.info(f"Google Calendar query detected: {explanation}")
-            response = self.google_calendar_query(user_input)
+        
         else:
             logger.info(f"Local query detected: {explanation}")
             response = self.perform_local_query(user_input, context, current_time)
@@ -226,7 +211,7 @@ class LLMWrapper:
 llm_wrapper = LLMWrapper(os.getenv("LLM_MODEL_PATH"))
 
 if __name__ == "__main__":
-    prompt = "Hey Akane specifically what do I like to do? could you also say my name?"
+    prompt = "Hey Akane do you recall our last conversation?"
     print(f"Processing prompt: {prompt}")
     response = llm_wrapper.generate_response(prompt)
     print("\nGenerated output:")
