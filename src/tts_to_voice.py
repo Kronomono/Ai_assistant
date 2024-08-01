@@ -1,91 +1,102 @@
-import re
-import json
 import os
-from dotenv import load_dotenv
-import logging
-import requests
+import sys
+import asyncio
+import edge_tts
+from pydub import AudioSegment
+import librosa
 import torch
-from llama_cpp import Llama
-from llm_axe.core import internet_search, read_website
-from memory import Memory
-from datetime import datetime
-load_dotenv()
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
-class LlamaWrapper:
-    def __init__(self, llama_model):
-        self.llama = llama_model
-    def ask(self, prompts, format="", temperature=0.7):
-        prompt = " ".join([p["content"] for p in prompts])
-        logger.debug(f"Sending prompt to Llama: {prompt}")
-        output = self.llama(prompt, max_tokens=2048, temperature=temperature, top_p=0.9, echo=False)
-        logger.debug(f"Raw output from Llama: {output}")
-        response = output['choices'][0]['text'].strip()
-        logger.debug(f"Stripped response: {response}")
-        return self.parse_json_response(response) if format == "json" else response
-    def parse_json_response(self, response):
-        try:
-            return json.dumps(json.loads(response))
-        except json.JSONDecodeError:
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
-            if json_match:
-                try:
-                    return json.dumps(json.loads(json_match.group()))
-                except json.JSONDecodeError:
-                    pass
-            return json.dumps({"response": response})
-class LLMWrapper:
-    def __init__(self, model_path):
-        self.model_path = model_path
-        self.llm = None
-        self.llama_wrapper = None
-        self.memory = Memory()
-        self.name = os.getenv('NAME_OF_BOT')  
-        self.role = os.getenv('ROLE_OF_BOT')  
-    def initialize(self):
-        if self.llm is None:
-            logger.info("Initializing LLM...")
-            gpu_layers = -1 if torch.cuda.is_available() else 0
-            logger.info(f"Using GPU layers: {gpu_layers}")
-            self.llm = Llama(model_path=self.model_path, n_ctx=2048, n_batch=512, n_gpu_layers=gpu_layers, verbose=True)
-            self.llama_wrapper = LlamaWrapper(self.llm)
-            logger.info("LLM initialized successfully.")
-    def ask(self, prompts: list, format: str = "", temperature: float = 0.7):
-        self.initialize()
-        return self.llama_wrapper.ask(prompts, format, temperature)
-    
-    def close(self):
-        if self.llm is not None:
-            del self.llm
-            self.llm = None
-            self.llama_wrapper = None
-            logger.info("LLM resources released.")
-    def classify_query(self, query):
-        classification_prompt = f"""
-        As {self.name}, a {self.role}, classify the following query into one of these categories:
-        1. 'local': Can be handled with existing information or {self.role} capabilities
-        2. 'online': - Requires up-to-date or specific information from the internet (eg. current news events, weather, stock prices etc.)
-            - Ask for specific web content or links
-            - Requires information about recent or upcoming events
-	@@ -143,7 +143,7 @@ def perform_local_query(self, user_input, context, current_time):
-1. Maintain the persona of {self.name}, the {self.role}.
-2. If asked about your capabilities or identity, respond accordingly.
-3. If you don't have enough information to answer the query, state that clearly.
-4. Response as a {self.role}, and be confident in your responses.
-5. Always provide a substantive response.
-6. Use the current date and time information when relevant to the query.
-	@@ -230,7 +230,7 @@ def extract_information(self, content, question, current_time):
-llm_wrapper = LLMWrapper(os.getenv("LLM_MODEL_PATH"))
+from scipy.io import wavfile
+from my_utils import load_audio, load_emotion_model, get_overall_mood
+from vc_infer_pipeline import VC
+from rvc import load_hubert, get_vc, Config
+
+# get Model for emotion detection
+def get_model_and_pitch(mood):
+    if mood == "joy":
+        return "voice_models/Starfire.pth", 8.0
+    elif mood == "sadness":
+        return "voice_models/RaidenShogunEN.pth", 2.0
+    elif mood == "anger":
+        return "voice_models/KafkaJP.pth", 3.0
+    elif mood == "fear":
+        return "voice_models/tokisaki-300.pth", 6.0
+    elif mood == "love":
+        return "voice_models/RieTakahashi.pth", 12.0
+    elif mood == "surprise":
+        return "voice_models/akanev2.pth", 10.0
+    elif mood == "neutral":
+        return "voice_models/akanev2.pth", 6.0
+    else:
+        return "voice_models/akanev2.pth", 6.0
+
+# TTS generation
+async def text_to_temp_wav(text, voice, speed, temp_wav_path):
+    temp_mp3_path = temp_wav_path.replace('.wav', '.mp3')
+    communicate = edge_tts.Communicate(text, voice, rate=speed)
+    await communicate.save(temp_mp3_path)
+    # Convert MP3 to WAV
+    audio = AudioSegment.from_mp3(temp_mp3_path)
+    audio.export(temp_wav_path, format="wav")
+    os.remove(temp_mp3_path)
+
+def verify_audio_file(audio_path):
+    try:
+        audio, sr = librosa.load(audio_path, sr=None)
+        return True
+    except Exception as e:
+        print(f"Failed to load {audio_path} with librosa: {e}")
+        return False
+
+def generate_tts_audio(txt_file, temp_wav_path, voice, speed):
+    with open(txt_file, 'r') as file:
+        text = file.read()
+    asyncio.run(text_to_temp_wav(text, voice, speed, temp_wav_path))
+    if not os.path.exists(temp_wav_path):
+        raise FileNotFoundError(f"Failed to generate temporary TTS audio file at {temp_wav_path}")
+    if not verify_audio_file(temp_wav_path):
+        raise RuntimeError(f"Temporary output WAV file {temp_wav_path} is not readable.")
+    mood = get_overall_mood(text)
+    print(f"The overall mood of the text is: {mood}")
+    return mood
+
+# Voice conversion
+def voice_conversion(temp_wav_path, output_wav_path, model_path, hubert_model_path, pitch_change):
+    device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+    is_half = False
+
+    # Load Hubert model
+    hubert_model = load_hubert(device, is_half, hubert_model_path)
+
+    # Load voice conversion model
+    config = Config(device=device, is_half=is_half)
+    cpt, version, net_g, tgt_sr, vc = get_vc(device, is_half, config, model_path)
+
+    # Run the voice conversion
+    audio = load_audio(temp_wav_path, 16000)
+    times = [0, 0, 0]
+    audio_opt = vc.pipeline(hubert_model, net_g, 0, audio, temp_wav_path, times, pitch_change, 'rmvpe', '', 0.5, 1, 3, tgt_sr, 0, 0.25, version, 0.33, 128)
+    wavfile.write(output_wav_path, tgt_sr, audio_opt)
+    os.remove(temp_wav_path)
 
 if __name__ == "__main__":
-    prompt = "Hello Akane, I am your creator Matthew. Its nice to meet you."
-    print(f"Processing prompt: {prompt}")
-    response = llm_wrapper.generate_response(prompt)
-    print("\nGenerated output:")
-    print(response)
-    print("\nDebug Information:")
-    print(f"LLM initialized: {llm_wrapper.llm is not None}")
-    print(f"CUDA available: {torch.cuda.is_available()}")
-    if torch.cuda.is_available():
-        print(f"CUDA device: {torch.cuda.get_device_name(0)}")
-    llm_wrapper.close()
+    # Parameters for TTS
+    txt_file = 'Testing.txt'
+    temp_wav_path = 'temp.wav'
+    voice = "en-US-AriaNeural"
+    speed = "+0%"
+
+    # Parameters for voice conversion
+    output_wav_path = 'output.wav'
+    hubert_model_path = 'rvc_models/hubert_base.pt'
+
+    # Generate TTS audio and get mood
+    mood = generate_tts_audio(txt_file, temp_wav_path, voice, speed)
+    
+    # Get model path and pitch change based on mood
+    model_path, pitch_change = get_model_and_pitch(mood)
+    print(f"Using model path: {model_path} and pitch change: {pitch_change} based on the mood: {mood}")
+    
+    # Convert voice
+    voice_conversion(temp_wav_path, output_wav_path, model_path, hubert_model_path, pitch_change)
+
+    print(f"Voice conversion completed. Output file: {output_wav_path}")
