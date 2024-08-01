@@ -11,19 +11,35 @@ from memory import Memory
 from datetime import datetime
 from google_calendar import GoogleCalendarManager
 
+# Load environment variables
 load_dotenv()
+
+# Set up logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+class LLMWrapper:
+    def __init__(self, model_path):
+        self.model_path = model_path
+        self.llm = None
+        self.memory = Memory()
+        self.name = os.getenv('NAME_OF_BOT')
+        self.role = os.getenv('ROLE_OF_BOT')
+        self.google_calendar = GoogleCalendarManager()
 
-class LlamaWrapper:
-    def __init__(self, llama_model):
-        self.llama = llama_model
+    def initialize(self):
+        if self.llm is None:
+            logger.info("Initializing LLM...")
+            gpu_layers = -1 if torch.cuda.is_available() else 0
+            logger.info(f"Using GPU layers: {gpu_layers}")
+            self.llm = Llama(model_path=self.model_path, n_ctx=2048, n_batch=512, n_gpu_layers=gpu_layers, verbose=True)
+            logger.info("LLM initialized successfully.")
 
     def ask(self, prompts, format="", temperature=0.7):
+        self.initialize()
         prompt = " ".join([p["content"] for p in prompts])
         logger.debug(f"Sending prompt to Llama: {prompt}")
-        output = self.llama(prompt, max_tokens=2048, temperature=temperature, top_p=0.9, echo=False)
+        output = self.llm(prompt, max_tokens=2048, temperature=temperature, top_p=0.9, echo=False)
         logger.debug(f"Raw output from Llama: {output}")
         response = output['choices'][0]['text'].strip()
         logger.debug(f"Stripped response: {response}")
@@ -42,40 +58,16 @@ class LlamaWrapper:
                     pass
             return json.dumps({"response": response})
 
-class LLMWrapper:
-    def __init__(self, model_path):
-        self.model_path = model_path
-        self.llm = None
-        self.llama_wrapper = None
-        self.memory = Memory()
-        self.name = os.getenv('NAME_OF_BOT')  
-        self.role = os.getenv('ROLE_OF_BOT')  
-        self.google_calendar = GoogleCalendarManager()
-
-    def initialize(self):
-        if self.llm is None:
-            logger.info("Initializing LLM...")
-            gpu_layers = -1 if torch.cuda.is_available() else 0
-            logger.info(f"Using GPU layers: {gpu_layers}")
-            self.llm = Llama(model_path=self.model_path, n_ctx=2048, n_batch=512, n_gpu_layers=gpu_layers, verbose=True)
-            self.llama_wrapper = LlamaWrapper(self.llm)
-            logger.info("LLM initialized successfully.")
-
-    def ask(self, prompts: list, format: str = "", temperature: float = 0.7):
-        self.initialize()
-        return self.llama_wrapper.ask(prompts, format, temperature)
-    
     def close(self):
         if self.llm is not None:
             del self.llm
             self.llm = None
-            self.llama_wrapper = None
             logger.info("LLM resources released.")
 
     def classify_query(self, query):
         classification_prompt = f"""
         As {self.name}, a {self.role}, classify the following query into one of these categories:
-        1. 'local': Can be handled with existing information or {self.role} capabilities
+        1. 'local': Can be handled with existing information or {self.role} capabilities. Or requires information about the user that can be obtained from memory.
         2. 'online': - Requires up-to-date or specific information from the internet (eg. current news events, weather, stock prices etc.)
             - Ask for specific web content or links
             - Requires information about recent or specific events
@@ -108,15 +100,12 @@ class LLMWrapper:
         return classification, explanation
 
     def generate_response(self, user_input):
-        if self.llm is None:
-                self.initialize()
+        self.initialize()
 
         query_type, explanation = self.classify_query(user_input)
-
         context = self.memory.get_relevant_context(user_input)
-            
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
+        
         if query_type == "online":
             logger.info(f"Online query detected: {explanation}")
             response = self.perform_online_search(user_input, current_time)
@@ -133,79 +122,12 @@ class LLMWrapper:
         ])
 
         logger.debug(f"DEBUG: LLM generated response: {response}")
-            
+        
         return response
     
-    def google_calendar_query(self, query):
-        analysis_prompt = f"""
-        Analyze the following Google Calendar query and determine which function to use:
-        1. list_calendars()
-        2. create_event(summary, start, end, description=None, location=None, recurrence=None, reminders=None)
-        3. get_events(start=None, end=None)
-        4. update_event(event_id, **kwargs)
-        5. delete_event(event_id)
-        6. quick_add_event(text)
-        7. set_reminders(event_id, reminders)
-        8. get_events_next_week()
-
-        Query: "{query}"
-
-        Function to use:
-        Required parameters:
-        Missing information:
-        """
-        
-        analysis = self.ask([{'role': 'user', 'content': analysis_prompt}], temperature=0.3).strip()
-        
-        if not analysis:
-            logger.warning("Received empty response from LLM")
-            return "I'm sorry, but I couldn't process your request. Could you please rephrase it?"
-
-        function_match = re.search(r'Function to use:?\s*(.*?)(?:\n|$)', analysis, re.IGNORECASE | re.DOTALL)
-        params_match = re.search(r'Required parameters:?\s*(.*?)(?:\n|$)', analysis, re.IGNORECASE | re.DOTALL)
-        missing_match = re.search(r'Missing information:?\s*(.*?)(?:\n|$)', analysis, re.IGNORECASE | re.DOTALL)
-        
-        function = function_match.group(1).strip() if function_match else None
-        params = params_match.group(1).strip() if params_match else None
-        missing = missing_match.group(1).strip() if missing_match else None
-        
-        logger.debug(f"Parsed function: {function}")
-        logger.debug(f"Parsed parameters: {params}")
-        logger.debug(f"Parsed missing information: {missing}")
-        
-        if not function:
-            return "I couldn't determine which calendar function to use. Could you please be more specific about what you want to do with your calendar?"
-
-        if missing and missing.lower() not in ['none', 'n/a', 'not applicable']:
-            return f"I need more information to process your request. {missing}"
-        
-        try:
-            if 'get_events_next_week' in function.lower():
-                return self.google_calendar.get_events_next_week()
-            elif 'list_calendars' in function.lower():
-                return str(self.google_calendar.list_calendars())
-            elif 'create_event' in function.lower():
-                return "To create an event, I need specific details like the event summary, start time, and end time."
-            elif 'get_events' in function.lower():
-                return str(self.google_calendar.get_events())
-            elif 'update_event' in function.lower():
-                return "To update an event, I need the event ID and the details you want to update."
-            elif 'delete_event' in function.lower():
-                return "To delete an event, I need the specific event ID."
-            elif 'quick_add_event' in function.lower():
-                return "To quickly add an event, please provide a brief description of the event."
-            elif 'set_reminders' in function.lower():
-                return "To set reminders, I need the event ID and the reminder details."
-            else:
-                return "I'm not sure how to process that request with regards to your Google Calendar. Could you please clarify what you'd like me to do?"
-        except Exception as e:
-            logger.error(f"Error processing Google Calendar query: {e}")
-            return f"An error occurred while processing your request: {str(e)}"
-    
-
     def perform_local_query(self, user_input, context, current_time):
         prompt = f"""As {self.name}, a {self.role}, respond to the following input:
-    
+
         Context from previous conversations:
         {context}
 
@@ -218,10 +140,9 @@ class LLMWrapper:
         1. Maintain the persona of {self.name}, the {self.role}.
         2. If asked about your capabilities or identity, respond accordingly.
         3. If you don't have enough information to answer the query, state that clearly.
-        4. Response as a {self.role}, and be confident in your responses.
+        4. Respond as a {self.role}, and be confident in your responses.
         5. Always provide a substantive response.
         6. Use the current date and time information when relevant to the query.
-
 
         Response:"""
 
@@ -305,7 +226,7 @@ class LLMWrapper:
 llm_wrapper = LLMWrapper(os.getenv("LLM_MODEL_PATH"))
 
 if __name__ == "__main__":
-    prompt = "Hello Akane, I am your creator Matthew. You have access to my google calendar. Can you check what events I have next week?"
+    prompt = "Hey Akane specifically what do I like to do? could you also say my name?"
     print(f"Processing prompt: {prompt}")
     response = llm_wrapper.generate_response(prompt)
     print("\nGenerated output:")

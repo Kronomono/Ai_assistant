@@ -57,3 +57,17 @@ def load_emotion_model(model_name):
     # Create a pipeline for emotion detection
     emotion_classifier = pipeline("text-classification", model=model, tokenizer=tokenizer)
     return emotion_classifier
+# Get the Mood from the text
+def get_overall_mood(text):
+    emotion_classifier = load_emotion_model("j-hartmann/emotion-english-distilroberta-base")
+    # Split the text into manageable segments
+    segments = text.split("\n")  # Assuming each paragraph is separated by a newline
+
+    # Get predictions for each segment
+    predictions = emotion_classifier(segments)
+
+    # Aggregate results to find overall mood
+    moods = [pred['label'] for pred in predictions]
+    overall_mood = max(set(moods), key=moods.count)  # Get the most frequent mood
+
+    return overall_mood
