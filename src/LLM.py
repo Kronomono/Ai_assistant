@@ -2,15 +2,13 @@ import re
 import os
 from dotenv import load_dotenv
 import logging
-import requests
 import torch
 from llama_cpp import Llama
-from llm_axe.core import internet_search, read_website
 from memory import Memory
 from datetime import datetime
 from personality_utils import load_embedded_personality
 from hyperdb import HyperDB, get_embedding
-
+from web_utils import extract_url, process_specific_url, enhanced_online_search
 
 # Load environment variables
 load_dotenv()
@@ -28,12 +26,11 @@ class LLMWrapper:
         self.role = os.getenv('ROLE_OF_BOT')
         self.personality, self.personality_embedding = load_embedded_personality()
         self.db = HyperDB()
-        
 
     def initialize(self):
         if self.llm is None:
             logger.info("Initializing LLM...")
-            gpu_layers =  -1 if torch.cuda.is_available() else 0 
+            gpu_layers = -1 if torch.cuda.is_available() else 0 
             logger.info(f"Using GPU layers: {gpu_layers}")
             self.llm = Llama(model_path=self.model_path, n_ctx=2048, n_batch=512, n_gpu_layers=gpu_layers, verbose=True)
             logger.info("LLM initialized successfully.")
@@ -46,7 +43,6 @@ class LLMWrapper:
         logger.debug(f"Raw output from Llama: {output}")
         response = output['choices'][0]['text'].strip()
         logger.debug(f"Stripped response: {response}")
-
         return response
     
     def close(self):
@@ -79,7 +75,6 @@ class LLMWrapper:
         if 'online' in response.lower():
             classification = 'online'
        
-        
         explanation_match = re.search(r'Explanation:(.*)', response, re.DOTALL)
         if explanation_match:
             explanation = explanation_match.group(1).strip()
@@ -99,7 +94,6 @@ class LLMWrapper:
         if query_type == "online":
             logger.info(f"Online query detected: {explanation}")
             response = self.perform_online_search(user_input, current_time)
-        
         else:
             logger.info(f"Local query detected: {explanation}")
             response = self.perform_local_query(user_input, context, current_time)
@@ -142,8 +136,8 @@ class LLMWrapper:
 
     def perform_online_search(self, user_input, current_time):
         try:
-            url = self.extract_url(user_input)
-            online_response = self.process_specific_url(url, user_input, current_time) if url else self.enhanced_online_search(user_input, current_time)
+            url = extract_url(user_input)
+            online_response = process_specific_url(self, url, user_input, current_time) if url else enhanced_online_search(self, user_input, current_time)
             
             if online_response:
                 logger.info("Valid online information found.")
@@ -155,67 +149,11 @@ class LLMWrapper:
             logger.error(f"Error during online search: {e}", exc_info=True)
             return self.perform_local_query(user_input, "", current_time)
 
-    @staticmethod
-    def extract_url(text):
-        url_match = re.search(r'https?://\S+', text)
-        return url_match.group() if url_match else None
-
-    def process_specific_url(self, url, user_input, current_time):
-        try:
-            page_content = self.safe_read_website(url)
-            if page_content:
-                extracted_info = self.extract_information(page_content, user_input, current_time)
-                logger.info(f"Extracted information from {url}: {extracted_info}")
-                if extracted_info and "No relevant information found" not in extracted_info:
-                    return f"Based on {url}, {extracted_info}"
-        except Exception as e:
-            logger.error(f"Error processing URL {url}: {e}")
-        return None
-
-    def enhanced_online_search(self, user_input, current_time):
-        logger.info("Performing general search...")
-        search_results = internet_search(user_input)
-        if search_results:
-            for result in search_results[:5]:
-                response = self.process_specific_url(result.get('url', ''), user_input, current_time)
-                if response:
-                    return response
-        return None
-
-    @staticmethod
-    def safe_read_website(url):
-        try:
-            return read_website(url)
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error reading website {url}: {e}")
-            return None
-
-    def extract_information(self, content, question, current_time):
-        prompt = f"""Extract the most relevant information from the following content to answer this question: "{question}"
-
-        Content:
-        {content[:5000]}
-
-        Current date and time: {current_time}
-
-        Instructions:
-        1. Extract only factual information directly related to the question.
-        2. If you find a clear, direct answer, state it concisely and completely.
-        3. Include specific details such as numbers, names, or other relevant data if mentioned.
-        4. If a complete list or description is available, provide it in full.
-        5. If no relevant information is found, state "No relevant information found."
-        6. Do not infer or generate information not present in the content.
-        7. Use the current date and time information when relevant to the query.
-
-        Extracted Information:"""
-
-        return self.ask([{'role': 'user', 'content': prompt}], temperature=0.3).strip()
-
 # Create a global instance
 llm_wrapper = LLMWrapper(os.getenv("LLM_MODEL_PATH"))
 
 if __name__ == "__main__":
-    prompt = "Hey Akane your smart could you use this link to tell me what number cosmog is in the national pokedex? https://bulbapedia.bulbagarden.net/wiki/Cosmog_(Pok%C3%A9mon)" 
+    prompt = "Hey Akane your smart could you use the internet to find out what the national pokedex number of cosmog is?" 
     print(f"Processing prompt: {prompt}")
     response = llm_wrapper.generate_response(prompt)
     print("\nGenerated output:")
