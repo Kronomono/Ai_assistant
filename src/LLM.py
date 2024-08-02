@@ -8,6 +8,8 @@ from llama_cpp import Llama
 from llm_axe.core import internet_search, read_website
 from memory import Memory
 from datetime import datetime
+from personality_utils import load_embedded_personality
+from hyperdb import HyperDB, get_embedding
 
 
 # Load environment variables
@@ -24,12 +26,14 @@ class LLMWrapper:
         self.memory = Memory()
         self.name = os.getenv('NAME_OF_BOT')
         self.role = os.getenv('ROLE_OF_BOT')
+        self.personality, self.personality_embedding = load_embedded_personality()
+        self.db = HyperDB()
         
 
     def initialize(self):
         if self.llm is None:
             logger.info("Initializing LLM...")
-            gpu_layers = -1 if torch.cuda.is_available() else 0
+            gpu_layers =  -1 if torch.cuda.is_available() else 0 
             logger.info(f"Using GPU layers: {gpu_layers}")
             self.llm = Llama(model_path=self.model_path, n_ctx=2048, n_batch=512, n_gpu_layers=gpu_layers, verbose=True)
             logger.info("LLM initialized successfully.")
@@ -53,7 +57,7 @@ class LLMWrapper:
 
     def classify_query(self, query):
         classification_prompt = f"""
-        As {self.name}, a {self.role}, classify the following query into one of these categories:
+        As {self.name}, a {self.role}, classify the following query into one of these categories. Just a single classification:
         1. 'local': Can be handled with existing information or {self.role} capabilities. Or requires information about the user that can be obtained from memory.
         2. 'online': - Requires up-to-date or specific information from the internet (eg. current news events, weather, stock prices etc.)
             - Ask for specific web content or links
@@ -112,6 +116,9 @@ class LLMWrapper:
     def perform_local_query(self, user_input, context, current_time):
         prompt = f"""As {self.name}, a {self.role}, respond to the following input:
 
+        Personality:
+        {self.personality}
+
         Context from previous conversations:
         {context}
 
@@ -121,12 +128,10 @@ class LLMWrapper:
         {user_input}
 
         Instructions:
-        1. Maintain the persona of {self.name}, the {self.role}.
-        2. If asked about your capabilities or identity, respond accordingly.
+        1. Respond authentically as {self.name}, based on the personality description provided.
+        2. Use the context from previous conversations to maintain continuity.
         3. If you don't have enough information to answer the query, state that clearly.
-        4. Respond as a {self.role}, and be confident in your responses.
-        5. Always provide a substantive response.
-        6. Use the current date and time information when relevant to the query.
+        4. Use the current date and time information when relevant to the query.
 
         Response:"""
 
@@ -210,7 +215,7 @@ class LLMWrapper:
 llm_wrapper = LLMWrapper(os.getenv("LLM_MODEL_PATH"))
 
 if __name__ == "__main__":
-    prompt = "Hey Akane do you recall our last conversation?"
+    prompt = "Hey Akane your smart could you use this link to tell me what number cosmog is in the national pokedex? https://bulbapedia.bulbagarden.net/wiki/Cosmog_(Pok%C3%A9mon)" 
     print(f"Processing prompt: {prompt}")
     response = llm_wrapper.generate_response(prompt)
     print("\nGenerated output:")
@@ -221,4 +226,5 @@ if __name__ == "__main__":
     print(f"CUDA available: {torch.cuda.is_available()}")
     if torch.cuda.is_available():
         print(f"CUDA device: {torch.cuda.get_device_name(0)}")
+        print(f"CUDA memory allocated: {torch.cuda.memory_allocated()}")
     llm_wrapper.close()
