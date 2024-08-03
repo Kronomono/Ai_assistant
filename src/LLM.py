@@ -8,7 +8,7 @@ from memory import Memory
 from datetime import datetime
 from personality_utils import load_embedded_personality
 from hyperdb import HyperDB, get_embedding
-from web_utils import extract_url, process_specific_url, enhanced_online_search
+from web_utils import extract_url, process_specific_url, enhanced_online_search, create_crawler
 
 # Load environment variables
 load_dotenv()
@@ -26,6 +26,7 @@ class LLMWrapper:
         self.role = os.getenv('ROLE_OF_BOT')
         self.personality, self.personality_embedding = load_embedded_personality()
         self.db = HyperDB()
+        self.crawler = create_crawler()
 
     def initialize(self):
         if self.llm is None:
@@ -39,6 +40,7 @@ class LLMWrapper:
         self.initialize()
         prompt = " ".join([p["content"] for p in prompts])
         logger.debug(f"Sending prompt to Llama: {prompt}")
+        logger.debug(f"Temperature: {temperature}")
         output = self.llm(prompt, max_tokens=2048, temperature=temperature, top_p=0.9, echo=False)
         logger.debug(f"Raw output from Llama: {output}")
         response = output['choices'][0]['text'].strip()
@@ -60,7 +62,6 @@ class LLMWrapper:
             - Requires information about recent or specific events
             - Involves searching for or comparing products or services
             - Needs information about a specific person, place or thing, that is not general knowledge, and is not about you or the user. (eg. "Who is the CEO of Google?", "What is the capital of France?")
-        
 
         Query: "{query}"
 
@@ -137,17 +138,44 @@ class LLMWrapper:
     def perform_online_search(self, user_input, current_time):
         try:
             url = extract_url(user_input)
-            online_response = process_specific_url(self, url, user_input, current_time) if url else enhanced_online_search(self, user_input, current_time)
+            online_response = process_specific_url(url, user_input, current_time) if url else enhanced_online_search(user_input, current_time, self)
             
             if online_response:
                 logger.info("Valid online information found.")
-                return online_response
+                return self.format_online_response(user_input, online_response, current_time)
             else:
                 logger.info("No valid online information found.")
                 return self.perform_local_query(user_input, "", current_time)
         except Exception as e:
             logger.error(f"Error during online search: {e}", exc_info=True)
             return self.perform_local_query(user_input, "", current_time)
+
+    def format_online_response(self, user_input, online_information, current_time):
+        prompt = f"""As {self.name}, a {self.role}, respond to the following input using the provided online information:
+
+        Personality:
+        {self.personality}
+
+        Current date and time: {current_time}
+
+        User input:
+        {user_input}
+
+        Online information:
+        {online_information}
+
+        Instructions:
+        1. Respond authentically as {self.name}, based on the personality description provided.
+        2. Use the online information to answer the user's query.
+        3. If the online information doesn't fully answer the query, state that clearly and provide what you can.
+        4. Use the current date and time information when relevant to the query.
+
+        Response:"""
+
+        formatted_response = self.ask([{'role': 'user', 'content': prompt}], temperature=0.5)
+        logger.debug(f"Formatted online response: {formatted_response}")
+        
+        return formatted_response.strip()
 
 # Create a global instance
 llm_wrapper = LLMWrapper(os.getenv("LLM_MODEL_PATH"))
