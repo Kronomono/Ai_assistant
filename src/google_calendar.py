@@ -56,7 +56,8 @@ class GoogleCalendarManager:
         else:
             return [event.id for event in matching_events]
 
-    def update_event(self, event_id, **kwargs):
+    def update_event(self, event_name, **kwargs):
+        event_id = self.find_event_by_name(event_name)
         try:
             event_to_update = self.calendar.get_event(event_id)
             for key, value in kwargs.items():
@@ -67,14 +68,16 @@ class GoogleCalendarManager:
         except Exception as e:
             return f"Error updating event: {str(e)}"
 
-    def delete_event(self, event_id):
+    def delete_event(self, event_name):
+        event_id = self.find_event_by_name(event_name)
         try:
             self.calendar.delete_event(event_id)
             return f"Event with ID: {event_id} has been deleted."
         except Exception as e:
             return f"Error deleting event: {str(e)}"
 
-    def get_event_details(self, event_id):
+    def get_event_details(self, event_name):
+        event_id = self.find_event_by_name(event_name)
         try:
             event = self.calendar.get_event(event_id)
             return f"## Event Details\n\n- Summary: {event.summary}\n- Start: {event.start}\n- End: {event.end}\n- Description: {event.description}\n- Location: {event.location}\n- ID: {event.id}"
@@ -85,21 +88,15 @@ class GoogleCalendarManager:
 if __name__ == "__main__":
     gcal = GoogleCalendarManager()
     
-    # Create a new event
     start_time = datetime.now() + timedelta(days=1)
     end_time = start_time + timedelta(hours=1)
     print(gcal.create_event("Test Event", start_time, end_time, description="This is a test event"))
     
-    # Find the event by name
-    event_id = gcal.find_event_by_name("Test Event")
-    if event_id:
-        # Get event details
-        print(gcal.get_event_details(event_id))
-        
-        # Update the event
-        print(gcal.update_event(event_id, description="Updated description"))
-        
-        # Delete the event
-        print(gcal.delete_event(event_id))
-    else:
-        print("Event not found")
+    # Find the event by name and get details
+    print(gcal.get_event_details("Test Event"))
+    
+    # Update the event
+    print(gcal.update_event("Test Event", description="Updated description"))
+    
+    # Delete the event
+    print(gcal.delete_event("Test Event"))
