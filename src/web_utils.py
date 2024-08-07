@@ -1,62 +1,107 @@
-import re
+import time
 import logging
-import requests
-from llm_axe.core import internet_search, read_website
+import re
+from typing import List, Dict
+from duckduckgo_search import DDGS
+from crawl4ai import WebCrawler
+from crawl4ai.extraction_strategy import CosineStrategy
 
 # Set up logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def extract_url(text):
-    url_match = re.search(r'https?://\S+', text)
-    return url_match.group() if url_match else None
+def extract_url(text: str) -> str:
+    url_pattern = r'https?://\S+'
+    match = re.search(url_pattern, text)
+    return match.group(0) if match else None
 
-def safe_read_website(url):
-    try:
-        return read_website(url)
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error reading website {url}: {e}")
-        return None
+def setup_cosine_strategy(query: str) -> CosineStrategy:
+    """
+    Set up and return a CosineStrategy instance.
+    
+    Args:
+        query (str): The search query to use as a semantic filter.
+    
+    Returns:
+        CosineStrategy: Configured CosineStrategy instance.
+    """
+    return CosineStrategy(
+        semantic_filter=query,
+        word_count_threshold=10,
+        max_dist=0.2,
+        linkage_method='ward',
+        top_k=3,
+        model_name='BAAI/bge-small-en-v1.5'
+    )
 
-def process_specific_url(llm_instance, url, user_input, current_time):
-    try:
-        page_content = safe_read_website(url)
-        if page_content:
-            extracted_info = extract_information(llm_instance, page_content, user_input, current_time)
-            logger.info(f"Extracted information from {url}: {extracted_info}")
-            if extracted_info and "No relevant information found" not in extracted_info:
-                return f"Based on {url}, {extracted_info}"
-    except Exception as e:
-        logger.error(f"Error processing URL {url}: {e}")
-    return None
+def search_and_crawl(query: str, max_results: int = 5) -> List[Dict[str, str]]:
+    """
+    Check if the query contains a URL. If it does, crawl that URL.
+    Otherwise, perform a DuckDuckGo search, then crawl the resulting URLs.
+    Use CosineStrategy to extract relevant content.
+    
+    Args:
+        query (str): The search query or URL.
+        max_results (int): Maximum number of results to return for a search. Defaults to 5.
+    
+    Returns:
+        List[Dict[str, str]]: A list of dictionaries containing URLs and their extracted content.
+    """
+    logger.info(f"Processing query: {query}")
+    
+    crawler = WebCrawler()
+    crawler.warmup()
+    
+    strategy = setup_cosine_strategy(query)
+    
+    url = extract_url(query)
+    if url:
+        logger.info(f"URL detected in query: {url}")
+        urls = [url]
+    else:
+        logger.info("No URL detected. Performing DuckDuckGo search.")
+        try:
+            with DDGS() as ddgs:
+                results = list(ddgs.text(query, region='wt-wt', safesearch='off', max_results=max_results))
+            urls = [result['href'] for result in results]
+            logger.info(f"Search completed. Found {len(urls)} results.")
+        except Exception as e:
+            logger.error(f"Error performing DuckDuckGo search: {e}")
+            return []
+    
+    crawled_results = []
+    for url in urls:
+        try:
+            logger.info(f"Crawling URL: {url}")
+            result = crawler.run(url=url, extraction_strategy=strategy)
+            if result.success:
+                crawled_results.append({"url": url, "content": result.extracted_content})
+            else:
+                logger.warning(f"Failed to crawl {url}")
+            time.sleep(5)  # Rate limiting
+        except Exception as e:
+            logger.error(f"Error crawling {url}: {e}")
+    
+    return crawled_results
 
-def enhanced_online_search(llm_instance, user_input, current_time):
-    logger.info("Performing general search...")
-    search_results = internet_search(user_input)
-    if search_results:
-        for result in search_results[:5]:
-            response = process_specific_url(llm_instance, result.get('url', ''), user_input, current_time)
-            if response:
-                return response
-    return None
-
-def extract_information(llm_instance, content, question, current_time):
-    prompt = f"""Extract the most relevant information from the following content to answer this question: "{question}"
-
-    Content:
-    {content[:5000]}
-
-    Current date and time: {current_time}
-
-    Instructions:
-    1. Extract only factual information directly related to the question.
-    2. If you find a clear, direct answer, state it concisely and completely.
-    3. Include specific details such as numbers, names, or other relevant data if mentioned.
-    4. If a complete list or description is available, provide it in full.
-    5. If no relevant information is found, state "No relevant information found."
-    6. Do not infer or generate information not present in the content.
-    7. Use the current date and time information when relevant to the query.
-
-    Extracted Information:"""
-
-    return llm_instance.ask([{'role': 'user', 'content': prompt}], temperature=0.3).strip()
+# Example usage
+if __name__ == "__main__":
+    # Test with a URL in the query
+    url_query = "Hey Akane search up https://stackoverflow.com/questions/5575569/is-there-any-free-custom-search-api-like-google-custom-search"
+    url_results = search_and_crawl(url_query)
+    
+    print("Results for URL query:")
+    for result in url_results:
+        print(f"URL: {result['url']}")
+        print(result['content'])
+        print("\n---\n")
+    
+    # Test with a regular search query
+    search_query = "cosmog moves"
+    search_results = search_and_crawl(search_query)
+    
+    print("Results for search query:")
+    for result in search_results:
+        print(f"URL: {result['url']}")
+        print(result['content'])
+        print("\n---\n")
