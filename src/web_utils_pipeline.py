@@ -53,15 +53,15 @@ def extract_information(llm_instance, question, current_time, max_results=3):
     
     all_relevant_info = []
     for chunk in chunks:
-        prompt = f"""Extract the most relevant information from the following content to answer this question: "{question}"
+        prompt = f"""Extract ALL relevant information from the following content to answer this question: "{question}"
         Content chunk from {chunk['url']}:
         {chunk['chunk']}
         Current date and time: {current_time}
         Instructions:
-        1. Extract only factual information directly related to the question.
-        2. If you find relevant information, state it concisely and completely.
-        3. Include specific details such as numbers, names, or other relevant data if mentioned.
-        4. Pay special attention to the first few sentences of the content, as they often contain key information.
+        1. Extract ALL factual information that could be relevant to the question, even if it seems redundant.
+        2. Include ALL specific details such as types, categories, numbers, names, or other relevant data mentioned.
+        3. Pay special attention to the first few sentences of the content, as they often contain key information.
+        4. If multiple pieces of information are found, list them all separately.
         5. If no relevant information is found in this chunk, state "No relevant information found in this chunk."
         6. Do not infer or generate information not present in the content.
         7. Use the current date and time information when relevant to the query.
@@ -74,10 +74,6 @@ def extract_information(llm_instance, question, current_time, max_results=3):
         except Exception as e:
             print(f"Error processing chunk: {e}")
             continue
-
-        # Break the loop if we have found enough relevant information
-        if len(all_relevant_info) >= 3:
-            break
     
     if not all_relevant_info:
         return "No relevant information found across all chunks."
@@ -86,17 +82,19 @@ def extract_information(llm_instance, question, current_time, max_results=3):
     combined_info = "\n".join(all_relevant_info)
     
     # Final summarization
-    summary_prompt = f"""Summarize the following extracted information to answer the question: "{question}"
+    summary_prompt = f"""Provide a comprehensive answer to the question based on the following extracted information: "{question}"
     Extracted Information:
     {combined_info}
     Current date and time: {current_time}
     Instructions:
-    1. Provide a concise and complete answer based on the extracted information.
-    2. Include specific details such as numbers, names, or other relevant data if mentioned.
-    3. If the information is incomplete or uncertain, state that clearly.
-    4. Use the current date and time information when relevant to the query.
-    5. Make sure to directly address the main focus of the question in your answer.
-    Final Answer:"""
+    1. Include ALL relevant details from the extracted information in your answer.
+    2. Ensure you mention ALL types, categories, or classifications if they are present in the information.
+    3. If there are multiple pieces of information, combine them into a coherent answer.
+    4. If the information is incomplete or uncertain, state that clearly.
+    5. Use the current date and time information when relevant to the query.
+    6. Make sure to directly and fully address the main focus of the question in your answer.
+    7. If there's any contradiction in the information, mention it and provide all versions.
+    Comprehensive Answer:"""
 
     try:
         final_answer = llm_instance.ask([{'role': 'user', 'content': summary_prompt}], temperature=0.3).strip()

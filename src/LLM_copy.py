@@ -173,7 +173,7 @@ class LLMWrapper:
 llm_wrapper = LLMWrapper(os.getenv("LLM_MODEL_PATH"))
 
 if __name__ == "__main__":
-    prompt = "Hey Akane find out what type solgaleo is https://bulbapedia.bulbagarden.net/wiki/Solgaleo_(Pok%C3%A9mon)" 
+    prompt = "Hey Akane find out what type or types solgaleo is https://bulbapedia.bulbagarden.net/wiki/Solgaleo_(Pok%C3%A9mon)" 
     print(f"Processing prompt: {prompt}")
     response = llm_wrapper.generate_response(prompt)
     print("\nGenerated output:")
