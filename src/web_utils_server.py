@@ -2,6 +2,7 @@ import os
 import time
 import logging
 import re
+import uvicorn
 from typing import List, Dict
 from duckduckgo_search import DDGS
 from crawl4ai import WebCrawler
@@ -14,6 +15,7 @@ from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from dotenv import load_dotenv
 from pydantic import BaseModel
+
 
 # Load .env file
 load_dotenv()
@@ -100,7 +102,7 @@ def extract_url(text: str) -> str:
 def setup_cosine_strategy(query: str) -> CosineStrategy:
     return CosineStrategy(
         semantic_filter=query,
-        word_count_threshold=10,
+        word_count_threshold=20,
         max_dist=0.2,
         linkage_method='ward',
         top_k=3,
@@ -111,6 +113,9 @@ def setup_cosine_strategy(query: str) -> CosineStrategy:
 class SearchRequest(BaseModel):
     query: str
     max_results: int = 5
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
 
 @app.post("/search_and_crawl")
 @limiter.limit(get_rate_limit())
@@ -146,12 +151,14 @@ async def search_and_crawl(request: Request, search_request: SearchRequest):
                 crawled_results.append({"url": url, "content": result.extracted_content})
             else:
                 logger.warning(f"Failed to crawl {url}")
-            time.sleep(1)  # Rate limiting
+            time.sleep(3)  # Rate limiting
         except Exception as e:
             logger.error(f"Error crawling {url}: {e}")
     
     return JSONResponse(content={"results": crawled_results})
 
-if __name__ == "__main__":
-    import uvicorn
+def run_server():
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+if __name__ == "__main__":
+   run_server()

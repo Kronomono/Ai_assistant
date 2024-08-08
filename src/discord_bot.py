@@ -8,6 +8,7 @@ from transcribe import WhisperTranscriber
 from my_utils import load_whisper_model
 from transformers import WhisperProcessor
 from LLM import llm_wrapper  # Import the llm_wrapper from LLM.py
+from web_utils_server import run_server
 
 # Load environment variables from .env file
 load_dotenv()
@@ -33,6 +34,7 @@ model_name = os.getenv("WHISPER_MODEL_NAME")
 model_path = os.getenv("WHISPER_MODEL_PATH")
 whisper_model = load_whisper_model(model_name, model_path)
 processor = WhisperProcessor.from_pretrained(model_name)
+
 
 class MyClient(Client):
     def __init__(self, whisper_model, processor, *args, **kwargs):
