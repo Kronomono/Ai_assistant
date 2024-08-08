@@ -68,7 +68,8 @@ class LLMWrapper:
             - Requires information about recent or specific events
             - Involves searching for or comparing products or services
             - Needs information about a specific person, place or thing, that is not general knowledge, and is not about you or the user. (eg. "Who is the CEO of Google?", "What is the capital of France?")
-
+            - Has a link in the query or mentions a specific website
+            - says classify this as online
         Query: "{query}"
 
         Classification (local/online):
@@ -172,7 +173,7 @@ class LLMWrapper:
 llm_wrapper = LLMWrapper(os.getenv("LLM_MODEL_PATH"))
 
 if __name__ == "__main__":
-    prompt = "Hey Akane your smart could you use the internet to find out what the national pokedex number of cosmog is?" 
+    prompt = "Hey Akane find out what type solgaleo is https://bulbapedia.bulbagarden.net/wiki/Solgaleo_(Pok%C3%A9mon)" 
     print(f"Processing prompt: {prompt}")
     response = llm_wrapper.generate_response(prompt)
     print("\nGenerated output:")

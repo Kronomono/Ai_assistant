@@ -6,7 +6,6 @@ import uvicorn
 from typing import List, Dict
 from duckduckgo_search import DDGS
 from crawl4ai import WebCrawler
-from crawl4ai.extraction_strategy import CosineStrategy
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -15,7 +14,6 @@ from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from dotenv import load_dotenv
 from pydantic import BaseModel
-
 
 # Load .env file
 load_dotenv()
@@ -99,20 +97,11 @@ def extract_url(text: str) -> str:
     match = re.search(url_pattern, text)
     return match.group(0) if match else None
 
-def setup_cosine_strategy(query: str) -> CosineStrategy:
-    return CosineStrategy(
-        semantic_filter=query,
-        word_count_threshold=20,
-        max_dist=0.2,
-        linkage_method='ward',
-        top_k=3,
-        model_name='BAAI/bge-small-en-v1.5'
-    )
-
 # Pydantic model for request validation
 class SearchRequest(BaseModel):
     query: str
     max_results: int = 5
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
@@ -124,8 +113,6 @@ async def search_and_crawl(request: Request, search_request: SearchRequest):
     
     crawler = WebCrawler()
     crawler.warmup()
-    
-    strategy = setup_cosine_strategy(search_request.query)
     
     url = extract_url(search_request.query)
     if url:
@@ -146,7 +133,7 @@ async def search_and_crawl(request: Request, search_request: SearchRequest):
     for url in urls:
         try:
             logger.info(f"Crawling URL: {url}")
-            result = crawler.run(url=url, extraction_strategy=strategy)
+            result = crawler.run(url=url)
             if result.success:
                 crawled_results.append({"url": url, "content": result.extracted_content})
             else:
