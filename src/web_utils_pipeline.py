@@ -37,10 +37,10 @@ def reword_question(llm_instance, question):
 def extract_information(llm_instance, question, current_time, max_results=3):
     reworded_query = reword_question(llm_instance,question)
     content = information_dump(reworded_query, 3)
-    
+    #{json.dumps(content, indent=2)[:5000]}
     prompt = f"""Extract the most relevant information from the following content to answer this question: "{question}"
     Content:
-    {json.dumps(content, indent=2)[:5000]}
+    {json.dumps(content, indent=2)}
     Current date and time: {current_time}
     Instructions:
     1. Extract only factual information directly related to the question.
