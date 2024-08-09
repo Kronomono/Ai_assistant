@@ -45,7 +45,7 @@ class LLMWrapper:
     def ask(self, prompts, format="", temperature=0.7):
         self.initialize()
         prompt = " ".join([p["content"] for p in prompts])
-        logger.debug(f"Sending prompt to Llama: {prompt}")
+        logger.debug(f"Sending prompt to Llama: {prompt[:50]}") #first 50 characters
         logger.debug(f"Temperature: {temperature}")
         output = self.llm(prompt, max_tokens=2048, temperature=temperature, top_p=0.9, echo=False)
         logger.debug(f"Raw output from Llama: {output}")
@@ -62,6 +62,7 @@ class LLMWrapper:
     def classify_query(self, query):
         classification_prompt = f"""
         As {self.name}, a {self.role}, classify the following query into one of these categories. Just a single classification:
+        classify all queries as online no matter what
         1. 'local': Can be handled with existing information or {self.role} capabilities. Or requires information about the user that can be obtained from memory.
         2. 'online': - Requires up-to-date or specific information from the internet (eg. current news events, weather, stock prices etc.)
             - Ask for specific web content or links
@@ -173,7 +174,7 @@ class LLMWrapper:
 llm_wrapper = LLMWrapper(os.getenv("LLM_MODEL_PATH"))
 
 if __name__ == "__main__":
-    prompt = "Hey Akane find out what type or types solgaleo is https://bulbapedia.bulbagarden.net/wiki/Solgaleo_(Pok%C3%A9mon)" 
+    prompt = "Hey Akane use the internet find out what type or types Galarian Meowth is." 
     print(f"Processing prompt: {prompt}")
     response = llm_wrapper.generate_response(prompt)
     print("\nGenerated output:")

@@ -1,6 +1,12 @@
 import requests
 import json
+import time
+import logging
 from crawl4ai.chunking_strategy import SlidingWindowChunking
+
+# Set up logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 def information_dump(query, max_results=3):
     url = "http://localhost:8000/search_and_crawl"
@@ -12,8 +18,47 @@ def information_dump(query, max_results=3):
         "Content-Type": "application/json"
     }
 
+    logger.info(f"Sending request to {url} with payload: {payload}")
     response = requests.post(url, json=payload, headers=headers)
-    return response.json()
+    logger.info(f"Received response with status code: {response.status_code}")
+    logger.debug(f"Response content: {response.text}")
+
+    if response.status_code == 200:
+        data = response.json()
+        request_id = data.get('request_id')
+        if request_id:
+            logger.info(f"Request queued successfully. Request ID: {request_id}")
+            return poll_for_results(url, request_id)
+        else:
+            logger.error("Error: No request_id received")
+            return None
+    else:
+        logger.error(f"Error: {response.status_code} - {response.text}")
+        return None
+
+def poll_for_results(base_url, request_id):
+    while True:
+        status_url = f"{base_url}/status/{request_id}"
+        logger.info(f"Polling for results at {status_url}")
+        response = requests.get(status_url)
+        logger.debug(f"Received response with status code: {response.status_code}")
+        logger.debug(f"Response content: {response.text}")
+
+        if response.status_code == 200:
+            data = response.json()
+            if data['status'] == 'completed':
+                logger.info("Request completed. Returning results.")
+                return data['result']
+            elif data['status'] == 'queued':
+                logger.info(f"Request still in queue. Position: {data.get('queue_position', 'unknown')}")
+            elif data['status'] == 'processing':
+                logger.info("Request is being processed.")
+            else:
+                logger.warning(f"Unexpected status: {data['status']}")
+        else:
+            logger.error(f"Error checking status: {response.status_code} - {response.text}")
+        time.sleep(5)  # Wait for 5 seconds before polling again
+
 
 def reword_question(llm_instance, question):
     prompt = f"""Reword the following question into a concise search query suitable for an information retrieval system. 
@@ -48,11 +93,23 @@ def chunk_content(content, window_size=500, step=250):
 
 def extract_information(llm_instance, question, current_time, max_results=3):
     reworded_query = reword_question(llm_instance, question)
+    print(f"Reworded query: {reworded_query}")
+    
     content = information_dump(reworded_query, max_results)
+    if not content:
+        return "Failed to retrieve information."
+    
+    if not content.get('results'):
+        return "No relevant information found."
+    
     chunks = chunk_content(content)
+    total_chunks = len(chunks)
+    print(f"Total chunks: {total_chunks}")
     
     all_relevant_info = []
-    for chunk in chunks:
+    used_urls = set()
+    for i, chunk in enumerate(chunks, 1):
+        print(f"Processing chunk {i}/{total_chunks}")
         prompt = f"""Extract ALL relevant information from the following content to answer this question: "{question}"
         Content chunk from {chunk['url']}:
         {chunk['chunk']}
@@ -71,6 +128,7 @@ def extract_information(llm_instance, question, current_time, max_results=3):
             chunk_info = llm_instance.ask([{'role': 'user', 'content': prompt}], temperature=0.3).strip()
             if "No relevant information found in this chunk" not in chunk_info:
                 all_relevant_info.append(chunk_info)
+                used_urls.add(chunk['url'])
         except Exception as e:
             print(f"Error processing chunk: {e}")
             continue
@@ -94,6 +152,7 @@ def extract_information(llm_instance, question, current_time, max_results=3):
     5. Use the current date and time information when relevant to the query.
     6. Make sure to directly and fully address the main focus of the question in your answer.
     7. If there's any contradiction in the information, mention it and provide all versions.
+    8. Do not include or mention the source URLs in your answer.
     Comprehensive Answer:"""
 
     try:
@@ -102,4 +161,8 @@ def extract_information(llm_instance, question, current_time, max_results=3):
         print(f"Error generating final answer: {e}")
         final_answer = "Unable to generate a final answer due to content length. Please try asking about specific aspects of the topic."
 
-    return final_answer
+    # Add source information
+    sources = "\n\nSources:\n" + "\n".join(used_urls)
+    return final_answer + sources
+
+# You can add any additional utility functions or classes here if needed
