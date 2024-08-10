@@ -45,7 +45,8 @@ class LLMWrapper:
     def ask(self, prompts, format="", temperature=0.7):
         self.initialize()
         prompt = " ".join([p["content"] for p in prompts])
-        logger.debug(f"Sending prompt to Llama: {prompt[:50]}") #first 50 characters
+        logger.debug(f"Sending prompt to Llama: {prompt}") 
+        #logger.debug(f"Sending prompt to Llama: {prompt[:50]}") #first 50 characters
         logger.debug(f"Temperature: {temperature}")
         output = self.llm(prompt, max_tokens=2048, temperature=temperature, top_p=0.9, echo=False)
         logger.debug(f"Raw output from Llama: {output}")
@@ -174,7 +175,7 @@ class LLMWrapper:
 llm_wrapper = LLMWrapper(os.getenv("LLM_MODEL_PATH"))
 
 if __name__ == "__main__":
-    prompt = "Hey Akane use the internet find out what type or types Galarian Meowth is." 
+    prompt = "Hey Akane use the internet find out how pikachu evolves into raichu" 
     print(f"Processing prompt: {prompt}")
     response = llm_wrapper.generate_response(prompt)
     print("\nGenerated output:")

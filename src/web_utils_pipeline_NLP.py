@@ -139,7 +139,7 @@ def extract_information(llm_instance, question, current_time, max_results=3):
     chunk_and_store_content(content)
     
     # Query the stored chunks
-    relevant_info = query_website_chunks(reworded_query, top_k=20)
+    relevant_info = query_website_chunks(reworded_query, top_k=10)
     
     if not relevant_info:
         return "No relevant information found across all sentences."

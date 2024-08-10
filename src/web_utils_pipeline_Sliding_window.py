@@ -3,7 +3,7 @@ import json
 import time
 import logging
 import os
-from crawl4ai.chunking_strategy import NlpSentenceChunking
+from crawl4ai.chunking_strategy import SlidingWindowChunking
 from hyperdb import HyperDB, get_embedding
 
 # Set up logging
@@ -88,7 +88,7 @@ def reword_question(llm_instance, question):
     return reworded_query
 
 def chunk_and_store_content(content):
-    chunker = NlpSentenceChunking()
+    chunker = SlidingWindowChunking(window_size=200, step=100)  # Adjust these values as needed
     chunks = []
     
     if isinstance(content, dict) and 'results' in content:
@@ -100,13 +100,12 @@ def chunk_and_store_content(content):
         return
 
     for result in results:
-        sentences = chunker.chunk(result['content'])
-        for sentence in sentences:
-            chunk = {
-                'sentence': sentence,
+        text_chunks = chunker.chunk(result['content'])
+        for chunk in text_chunks:
+            chunks.append({
+                'chunk': chunk,
                 'url': result['url']
-            }
-            chunks.append(chunk)
+            })
     
     website_chunks_db.add(chunks)
     
@@ -114,7 +113,7 @@ def chunk_and_store_content(content):
     file_path = os.path.join(CHUNKS_DIR, f"chunks_{int(time.time())}.gz")
     website_chunks_db.save(file_path)
 
-def query_website_chunks(query, top_k=20):
+def query_website_chunks(query, top_k=10):
     # Load all chunk files
     for file_name in os.listdir(CHUNKS_DIR):
         file_path = os.path.join(CHUNKS_DIR, file_name)
@@ -139,13 +138,13 @@ def extract_information(llm_instance, question, current_time, max_results=3):
     chunk_and_store_content(content)
     
     # Query the stored chunks
-    relevant_info = query_website_chunks(reworded_query, top_k=20)
+    relevant_info = query_website_chunks(reworded_query, top_k=10)
     
     if not relevant_info:
-        return "No relevant information found across all sentences."
+        return "No relevant information found across all chunks."
     
-    # Combine relevant sentences
-    combined_info = "\n".join([info[0]['sentence'] for info in relevant_info])
+    # Combine relevant chunks
+    combined_info = "\n".join([info[0]['chunk'] for info in relevant_info])
     
     # Final summarization
     summary_prompt = f"""Provide a comprehensive answer to the question based on the following extracted information: "{question}"
@@ -173,3 +172,5 @@ def extract_information(llm_instance, question, current_time, max_results=3):
     used_urls = set(info[0]['url'] for info in relevant_info)
     sources = "\n\nSources:\n" + "\n".join(used_urls)
     return final_answer + sources
+
+# You can add any additional utility functions or classes here if needed
