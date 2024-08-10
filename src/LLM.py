@@ -8,7 +8,9 @@ from memory import Memory
 from datetime import datetime
 from personality_utils import load_embedded_personality
 from hyperdb import HyperDB, get_embedding
-from web_utils import extract_url, process_specific_url, enhanced_online_search, create_crawler
+from web_utils_pipeline import extract_information
+from web_utils_server import run_server
+import threading
 
 # Load environment variables
 load_dotenv()
@@ -26,7 +28,11 @@ class LLMWrapper:
         self.role = os.getenv('ROLE_OF_BOT')
         self.personality, self.personality_embedding = load_embedded_personality()
         self.db = HyperDB()
-        self.crawler = create_crawler()
+        
+        
+        # Start the server in a separate thread
+        server_thread = threading.Thread(target=run_server)
+        server_thread.start()
 
     def initialize(self):
         if self.llm is None:
@@ -39,7 +45,8 @@ class LLMWrapper:
     def ask(self, prompts, format="", temperature=0.7):
         self.initialize()
         prompt = " ".join([p["content"] for p in prompts])
-        logger.debug(f"Sending prompt to Llama: {prompt}")
+        logger.debug(f"Sending prompt to Llama: {prompt}") 
+        #logger.debug(f"Sending prompt to Llama: {prompt[:50]}") #first 50 characters
         logger.debug(f"Temperature: {temperature}")
         output = self.llm(prompt, max_tokens=2048, temperature=temperature, top_p=0.9, echo=False)
         logger.debug(f"Raw output from Llama: {output}")
@@ -56,13 +63,15 @@ class LLMWrapper:
     def classify_query(self, query):
         classification_prompt = f"""
         As {self.name}, a {self.role}, classify the following query into one of these categories. Just a single classification:
+      
         1. 'local': Can be handled with existing information or {self.role} capabilities. Or requires information about the user that can be obtained from memory.
         2. 'online': - Requires up-to-date or specific information from the internet (eg. current news events, weather, stock prices etc.)
             - Ask for specific web content or links
             - Requires information about recent or specific events
             - Involves searching for or comparing products or services
             - Needs information about a specific person, place or thing, that is not general knowledge, and is not about you or the user. (eg. "Who is the CEO of Google?", "What is the capital of France?")
-
+            - Has a link in the query or mentions a specific website
+            - says classify this as online
         Query: "{query}"
 
         Classification (local/online):
@@ -94,7 +103,7 @@ class LLMWrapper:
         
         if query_type == "online":
             logger.info(f"Online query detected: {explanation}")
-            response = self.perform_online_search(user_input, current_time)
+            response = extract_information(self, user_input, current_time)
         else:
             logger.info(f"Local query detected: {explanation}")
             response = self.perform_local_query(user_input, context, current_time)
@@ -135,21 +144,6 @@ class LLMWrapper:
         
         return local_response.strip()
 
-    def perform_online_search(self, user_input, current_time):
-        try:
-            url = extract_url(user_input)
-            online_response = process_specific_url(url, user_input, current_time) if url else enhanced_online_search(user_input, current_time, self)
-            
-            if online_response:
-                logger.info("Valid online information found.")
-                return self.format_online_response(user_input, online_response, current_time)
-            else:
-                logger.info("No valid online information found.")
-                return self.perform_local_query(user_input, "", current_time)
-        except Exception as e:
-            logger.error(f"Error during online search: {e}", exc_info=True)
-            return self.perform_local_query(user_input, "", current_time)
-
     def format_online_response(self, user_input, online_information, current_time):
         prompt = f"""As {self.name}, a {self.role}, respond to the following input using the provided online information:
 
@@ -181,7 +175,7 @@ class LLMWrapper:
 llm_wrapper = LLMWrapper(os.getenv("LLM_MODEL_PATH"))
 
 if __name__ == "__main__":
-    prompt = "Hey Akane your smart could you use the internet to find out what the national pokedex number of cosmog is?" 
+    prompt = "Hey Akane use the internet find out how pikachu evolves into raichu" 
     print(f"Processing prompt: {prompt}")
     response = llm_wrapper.generate_response(prompt)
     print("\nGenerated output:")

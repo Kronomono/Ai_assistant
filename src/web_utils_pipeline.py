@@ -5,13 +5,18 @@ import logging
 import os
 from crawl4ai.chunking_strategy import NlpSentenceChunking
 from hyperdb import HyperDB, get_embedding
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # Create a directory for storing website chunks
-CHUNKS_DIR = os.path.join(os.path.dirname(__file__), 'website_chunks')
+CHUNKS_DIR = os.getenv('WEBSITE_CHUNKS_DIR')
+
 os.makedirs(CHUNKS_DIR, exist_ok=True)
 
 # Initialize HyperDB for storing website chunks
